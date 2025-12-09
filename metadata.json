@@ -1,0 +1,5 @@
+{
+  "name": "Consultores Empresariales IA",
+  "description": "A multi-agent AI consultancy chat system using Supabase and Gemini.",
+  "requestFramePermissions": []
+}
