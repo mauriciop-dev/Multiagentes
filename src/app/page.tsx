@@ -31,27 +31,32 @@ export default function Page() {
   useEffect(() => {
     const initSession = async () => {
       try {
-        // Use the safely exported URL from the client file
-        const hasEnvVars = supabaseUrl && !supabaseUrl.includes('placeholder');
-
-        if (!hasEnvVars) {
-          throw new Error("Supabase URL no encontrada. Verifica las variables de entorno.");
+        console.log("Iniciando conexión a Supabase...");
+        
+        // 1. Verificar URL
+        if (!supabaseUrl || supabaseUrl.includes('placeholder')) {
+          throw new Error("La variable NEXT_PUBLIC_SUPABASE_URL no está definida o es incorrecta.");
         }
 
-        // 1. Anonymous Auth
-        const { data: { user }, error: authError } = await supabase.auth.getUser();
-        
-        let userId = user?.id;
+        // 2. Autenticación Anónima
+        const { data: authData, error: authError } = await supabase.auth.getUser();
+        let userId = authData?.user?.id;
 
         if (!userId) {
+          console.log("Usuario no detectado, intentando login anónimo...");
           const { data: anonData, error: anonError } = await supabase.auth.signInAnonymously();
-          if (anonError) throw anonError;
+          
+          if (anonError) {
+            console.error("Error Auth Anónimo:", anonError);
+            throw new Error(`Error de Autenticación: ${anonError.message}. Asegúrate de habilitar 'Anonymous Sign-ins' en Supabase.`);
+          }
           userId = anonData.user?.id;
         }
 
-        if (!userId) throw new Error("No se pudo autenticar con Supabase.");
+        if (!userId) throw new Error("No se pudo obtener un ID de usuario.");
 
-        // 2. Check for existing active session or create new
+        // 3. Crear Sesión en Base de Datos
+        console.log("Creando sesión para usuario:", userId);
         const { data: newSession, error: dbError } = await supabase
           .from('sessions')
           .insert({
@@ -64,13 +69,16 @@ export default function Page() {
           .select()
           .single();
 
-        if (dbError) throw dbError;
+        if (dbError) {
+          console.error("Error DB Insert:", dbError);
+          throw new Error(`Error de Base de Datos: ${dbError.message} (Código: ${dbError.code}). ¿Creaste la tabla 'sessions'?`);
+        }
         
         setSessionData(newSession as SessionData);
 
       } catch (error: any) {
-        console.warn("Entrando en Modo Demo debido a:", error);
-        setErrorMessage(error.message || "Error desconocido de conexión");
+        console.error("Fallo crítico:", error);
+        setErrorMessage(error.message || "Error desconocido");
         setSessionData(DEMO_SESSION);
         setIsDemo(true);
       } finally {
@@ -85,18 +93,7 @@ export default function Page() {
     return (
       <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
         <div className="w-12 h-12 border-4 border-cyan-600 border-t-transparent rounded-full animate-spin mb-4"></div>
-        <p className="text-cyan-800 font-semibold animate-pulse">Inicializando entorno...</p>
-      </div>
-    );
-  }
-
-  if (!sessionData) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-red-500 bg-white p-6 rounded-xl shadow-lg border border-red-100 max-w-md">
-          <h3 className="font-bold text-lg mb-2">Error crítico</h3>
-          <p>{errorMessage || "No se pudo cargar la aplicación."}</p>
-        </div>
+        <p className="text-cyan-800 font-semibold animate-pulse">Conectando con Supabase...</p>
       </div>
     );
   }
@@ -104,13 +101,16 @@ export default function Page() {
   return (
     <main className="min-h-screen bg-gray-100 p-4 font-sans text-gray-900 relative">
       {isDemo && (
-        <div className="absolute top-0 left-0 w-full bg-yellow-100 text-yellow-800 text-xs py-2 px-4 text-center border-b border-yellow-200 z-50">
-          <strong>Modo Vista Previa:</strong> ({errorMessage}) <br/>
-          <span className="opacity-80">La base de datos y la IA están simuladas. Configura tus Keys en Vercel/Env para activar el sistema real.</span>
+        <div className="absolute top-0 left-0 w-full bg-red-100 text-red-900 text-sm py-3 px-4 border-b border-red-200 z-50 shadow-sm">
+          <div className="max-w-4xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-2">
+            <div>
+              <strong>Modo Demo Activo:</strong> {errorMessage}
+            </div>
+          </div>
         </div>
       )}
-      <div className={isDemo ? "mt-10" : ""}>
-        <ChatUI initialSession={sessionData} />
+      <div className={isDemo ? "mt-12" : ""}>
+        {sessionData && <ChatUI initialSession={sessionData} />}
       </div>
     </main>
   );

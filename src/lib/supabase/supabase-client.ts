@@ -1,41 +1,16 @@
 import { createClient } from '@supabase/supabase-js';
 
-// Access environment variables explicitly. 
-// In Next.js, process.env.NEXT_PUBLIC_VAR is replaced by the string value at build time.
-// We treat process.env as the primary source, with a fallback for Vite/other environments if needed.
+// En Next.js, las variables deben accederse DIRECTAMENTE como process.env.NEXT_PUBLIC_VARIABLE
+// para que el compilador las reemplace por su valor real en el navegador.
 
-const getSupabaseUrl = () => {
-  // @ts-ignore
-  if (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_SUPABASE_URL) {
-    return process.env.NEXT_PUBLIC_SUPABASE_URL;
-  }
-  // @ts-ignore
-  if (typeof import.meta !== 'undefined' && import.meta.env?.NEXT_PUBLIC_SUPABASE_URL) {
-    // @ts-ignore
-    return import.meta.env.NEXT_PUBLIC_SUPABASE_URL;
-  }
-  return '';
-};
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-const getSupabaseKey = () => {
-  // @ts-ignore
-  if (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
-    return process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  }
-  // @ts-ignore
-  if (typeof import.meta !== 'undefined' && import.meta.env?.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
-    // @ts-ignore
-    return import.meta.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  }
-  return '';
-};
+// Verificación básica para evitar crash si faltan, pero usará placeholder
+const finalUrl = supabaseUrl || 'https://placeholder.supabase.co';
+const finalKey = supabaseKey || 'placeholder-key';
 
-export const supabaseUrl = getSupabaseUrl();
-export const supabaseKey = getSupabaseKey();
+export const supabase = createClient(finalUrl, finalKey);
 
-// Fallback to placeholder to prevent crash during initialization if keys are missing,
-// but the app logic will catch the empty URL later.
-export const supabase = createClient(
-  supabaseUrl || 'https://placeholder.supabase.co',
-  supabaseKey || 'placeholder-key'
-);
+// Exportamos las vars para verificarlas en la UI si es necesario
+export { finalUrl as supabaseUrl, finalKey as supabaseKey };
