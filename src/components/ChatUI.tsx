@@ -19,7 +19,15 @@ export default function ChatUI({ initialSession, customSupabase }: ChatUIProps) 
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
+  
+  // Determinamos si es demo basado en el estado ACTUAL de la sesión
   const isDemo = session.id === 'demo-session';
+
+  // FIX: Sincronizar el estado local cuando cambia la prop initialSession.
+  // Esto es crucial cuando se pasa del Modo Demo a una sesión real tras la conexión manual.
+  useEffect(() => {
+    setSession(initialSession);
+  }, [initialSession]);
 
   // Subscribe to real-time changes
   useEffect(() => {
