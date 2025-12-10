@@ -8,11 +8,19 @@ import { SupabaseClient } from '@supabase/supabase-js';
 interface ChatUIProps {
   initialSession: SessionData;
   customSupabase?: SupabaseClient;
-  manualConfig?: { url: string, key: string }; // Configuración manual opcional
+  // Objeto de configuración unificado para pasar credenciales manuales al backend
+  config?: {
+    supabase?: { url: string; key: string };
+    geminiApiKey?: string;
+  };
+  /** @deprecated usar config */
+  manualConfig?: { url: string; key: string }; 
 }
 
-export default function ChatUI({ initialSession, customSupabase, manualConfig }: ChatUIProps) {
-  // Usamos el cliente inyectado o el por defecto
+export default function ChatUI({ initialSession, customSupabase, config, manualConfig }: ChatUIProps) {
+  // Compatibilidad hacia atrás si se usa la prop antigua
+  const effectiveConfig = config || (manualConfig ? { supabase: manualConfig } : undefined);
+
   const supabase = customSupabase || defaultSupabase;
   
   const [session, setSession] = useState<SessionData>(initialSession);
@@ -21,15 +29,12 @@ export default function ChatUI({ initialSession, customSupabase, manualConfig }:
   const [errorMsg, setErrorMsg] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
   
-  // Determinamos si es demo basado en el estado ACTUAL de la sesión
   const isDemo = session.id === 'demo-session';
 
-  // FIX: Sincronizar el estado local cuando cambia la prop initialSession.
   useEffect(() => {
     setSession(initialSession);
   }, [initialSession]);
 
-  // Subscribe to real-time changes
   useEffect(() => {
     if (isDemo) return; 
 
@@ -50,9 +55,8 @@ export default function ChatUI({ initialSession, customSupabase, manualConfig }:
         }
       )
       .subscribe((status) => {
-        console.log("Estado de suscripción:", status);
         if (status === 'CHANNEL_ERROR') {
-          console.error("Error en canal realtime. Verifica configuración de Supabase.");
+          console.error("Error en canal realtime.");
         }
       });
 
@@ -61,7 +65,6 @@ export default function ChatUI({ initialSession, customSupabase, manualConfig }:
     };
   }, [session.id, isDemo, supabase]);
 
-  // Auto-scroll to bottom
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [session.chat_history, session.current_state]);
@@ -72,7 +75,7 @@ export default function ChatUI({ initialSession, customSupabase, manualConfig }:
     setErrorMsg('');
 
     if (isDemo) {
-      setErrorMsg("Funcionalidad deshabilitada en Modo Demo. Configura las variables en Vercel o en el panel manual.");
+      setErrorMsg("Funcionalidad deshabilitada en Modo Demo. Configura las credenciales.");
       return;
     }
 
@@ -81,13 +84,13 @@ export default function ChatUI({ initialSession, customSupabase, manualConfig }:
     setLoading(true);
 
     try {
-      // FIX: Pasar manualConfig al Server Action para asegurar que use la misma DB que el cliente
-      await processUserMessage(session.id, session.user_id, userText, manualConfig);
+      // Pasamos el config completo al servidor (incluyendo Gemini API Key si existe)
+      await processUserMessage(session.id, session.user_id, userText, effectiveConfig);
     } catch (error: any) {
       console.error(error);
       const msg = error.message || "Error desconocido";
       if (msg.includes("API_KEY")) {
-        setErrorMsg("Error Server-Side: Falta API_KEY de Gemini.");
+        setErrorMsg("Error Server-Side: Falta API_KEY de Gemini. Ingrésala en Configuración (⚙️).");
       } else {
         setErrorMsg(`Error: ${msg}`);
       }

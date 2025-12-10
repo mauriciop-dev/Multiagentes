@@ -33,6 +33,7 @@ export default function Page() {
   const [showManualConfig, setShowManualConfig] = useState(false);
   const [manualUrl, setManualUrl] = useState('');
   const [manualKey, setManualKey] = useState('');
+  const [manualGeminiKey, setManualGeminiKey] = useState(''); // Nuevo estado para Gemini Key
   const [activeSupabase, setActiveSupabase] = useState<SupabaseClient>(defaultSupabase);
 
   const attemptConnection = async (client: SupabaseClient) => {
@@ -40,11 +41,10 @@ export default function Page() {
       setLoading(true);
       setErrorMessage('');
 
-      // 0. PRE-CHECK: Si la URL es placeholder, abortar silenciosamente.
+      // 0. PRE-CHECK
       // @ts-ignore
       const clientUrl = (client as any).supabaseUrl || '';
       if (clientUrl.includes('placeholder.supabase.co') || clientUrl.includes('placeholder')) {
-         // Lanzamos error controlado para ir a catch sin loguear basura
          throw new Error("ENV_MISSING"); 
       }
 
@@ -53,17 +53,12 @@ export default function Page() {
       let userId = authData?.user?.id;
 
       if (!userId) {
-        // Intentar anon sign in
         const { data: anonData, error: anonError } = await client.auth.signInAnonymously();
-        
         if (anonError) {
-          // Si falla auth, probamos conectividad básica a la BD para diferenciar error de red vs error de auth
           const { error: dbCheckError } = await client.from('sessions').select('count').limit(1);
-          
           if (dbCheckError && dbCheckError.message && dbCheckError.message.includes('Failed to fetch')) {
              throw new Error("NETWORK_ERROR");
           }
-          
           if (!anonData?.user) {
              throw new Error("AUTH_ERROR");
           }
@@ -95,20 +90,16 @@ export default function Page() {
         }
       }
     } catch (error: any) {
-      // Manejo de errores "limpio"
       const msg = error.message || '';
-      
-      // Solo logueamos si es un error inesperado, no si es configuración faltante
       if (msg !== 'ENV_MISSING' && msg !== 'NETWORK_ERROR') {
         console.warn("Conexión automática no disponible:", msg);
       }
 
-      // Mensajes amigables para la UI
       let uiMsg = '';
       if (msg === 'NETWORK_ERROR' || msg.includes('Failed to fetch')) {
         uiMsg = "No se pudo conectar a Supabase. Verifica tu URL.";
       } else if (msg === 'ENV_MISSING') {
-        uiMsg = ""; // No mostrar error, solo pedir config
+        uiMsg = ""; 
       } else if (msg === 'AUTH_ERROR') {
         uiMsg = "Fallo de autenticación. Verifica tus credenciales.";
       } else {
@@ -135,12 +126,14 @@ export default function Page() {
     // Sanear inputs
     let cleanUrl = manualUrl.trim();
     if (!cleanUrl.startsWith('http')) cleanUrl = `https://${cleanUrl}`;
-    cleanUrl = cleanUrl.replace(/\/$/, ''); // Quitar slash final
+    cleanUrl = cleanUrl.replace(/\/$/, '');
     
     const cleanKey = manualKey.trim();
+    const cleanGeminiKey = manualGeminiKey.trim();
 
     setManualUrl(cleanUrl);
     setManualKey(cleanKey);
+    setManualGeminiKey(cleanGeminiKey);
 
     const manualClient = createManualClient(cleanUrl, cleanKey);
     attemptConnection(manualClient);
@@ -158,13 +151,12 @@ export default function Page() {
   return (
     <main className="min-h-screen bg-gray-100 p-4 font-sans text-gray-900 relative">
       
-      {/* Panel de Configuración Manual (Se muestra si hay error o falta config) */}
       {showManualConfig && (
         <div className="absolute top-0 left-0 w-full h-full bg-gray-900/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 overflow-y-auto max-h-[90vh]">
             <h2 className="text-2xl font-bold text-gray-800 mb-2">Configuración</h2>
             <p className="text-gray-600 text-sm mb-4">
-              Ingresa tus credenciales de Supabase para iniciar.
+              Ingresa tus credenciales para iniciar.
             </p>
             
             {errorMessage && (
@@ -174,27 +166,48 @@ export default function Page() {
             )}
 
             <form onSubmit={handleManualSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Project URL</label>
-                <input 
-                  type="text" 
-                  value={manualUrl}
-                  onChange={(e) => setManualUrl(e.target.value)}
-                  placeholder="https://tu-proyecto.supabase.co"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-cyan-500 outline-none text-sm"
-                />
+              <div className="pt-2 border-t border-gray-100">
+                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Base de Datos (Supabase)</h3>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Project URL</label>
+                    <input 
+                      type="text" 
+                      value={manualUrl}
+                      onChange={(e) => setManualUrl(e.target.value)}
+                      placeholder="https://tu-proyecto.supabase.co"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-cyan-500 outline-none text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Anon Key (Public)</label>
+                    <input 
+                      type="password" 
+                      value={manualKey}
+                      onChange={(e) => setManualKey(e.target.value)}
+                      placeholder="eyJhbGciOiJIUzI1NiIsInR..."
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-cyan-500 outline-none text-sm"
+                    />
+                  </div>
+                </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Anon Key (Public)</label>
-                <input 
-                  type="password" 
-                  value={manualKey}
-                  onChange={(e) => setManualKey(e.target.value)}
-                  placeholder="eyJhbGciOiJIUzI1NiIsInR..."
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-cyan-500 outline-none text-sm"
-                />
+
+              <div className="pt-4 border-t border-gray-100">
+                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Inteligencia Artificial (Google)</h3>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Gemini API Key</label>
+                  <input 
+                    type="password" 
+                    value={manualGeminiKey}
+                    onChange={(e) => setManualGeminiKey(e.target.value)}
+                    placeholder="AIzaSy..."
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-cyan-500 outline-none text-sm"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Opcional si ya configuraste la variable de entorno, pero necesario si ves errores de Key.</p>
+                </div>
               </div>
-              <div className="flex gap-3 mt-6">
+
+              <div className="flex gap-3 mt-6 pt-4">
                 <button 
                   type="button"
                   onClick={() => setShowManualConfig(false)}
@@ -215,7 +228,6 @@ export default function Page() {
         </div>
       )}
 
-      {/* Botón Flotante para reabrir config si estamos en demo */}
       {isDemo && !showManualConfig && (
         <button 
           onClick={() => setShowManualConfig(true)}
@@ -226,14 +238,15 @@ export default function Page() {
         </button>
       )}
 
-      {/* Main UI */}
       {sessionData && (
         <ChatUI 
           initialSession={sessionData} 
           customSupabase={activeSupabase}
-          manualConfig={
-            manualUrl && manualKey ? { url: manualUrl, key: manualKey } : undefined
-          }
+          // Pasamos una configuración más robusta que incluye Gemini
+          config={{
+            supabase: manualUrl && manualKey ? { url: manualUrl, key: manualKey } : undefined,
+            geminiApiKey: manualGeminiKey || undefined
+          }}
         />
       )}
     </main>

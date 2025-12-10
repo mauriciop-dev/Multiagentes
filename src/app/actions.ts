@@ -4,27 +4,35 @@ import { GoogleGenAI } from "@google/genai";
 import { createClient } from '@supabase/supabase-js';
 import { Message, SessionData } from '../lib/types';
 
+interface ActionConfig {
+  supabase?: { url: string; key: string };
+  geminiApiKey?: string;
+  /** @deprecated backward compatibility */
+  url?: string;
+  /** @deprecated backward compatibility */
+  key?: string;
+}
+
 // -- Configuración de Entorno --
 
 // Helper para obtener Google AI de forma segura (Server Side)
-function getAI() {
-  // Intentamos obtener la API KEY de las variables de entorno.
-  // Nota: En Next.js Server Actions, process.env.API_KEY debería estar disponible.
-  const apiKey = process.env.API_KEY;
+// Ahora acepta un parámetro opcional para override manual
+function getAI(manualKey?: string) {
+  // Prioridad: 1. Manual Key (desde UI), 2. Env Var
+  const apiKey = manualKey || process.env.API_KEY;
   
   if (!apiKey) {
     console.error("CRITICAL ERROR: 'API_KEY' environment variable is missing.");
-    // Lanzamos un error descriptivo para que se refleje en la UI
     throw new Error("La variable de entorno API_KEY no está configurada en el servidor.");
   }
   
   return new GoogleGenAI({ apiKey });
 }
 
-// Helper para obtener Supabase con permisos de administración
-function getSupabase(manualConfig?: { url: string, key: string }) {
-  if (manualConfig?.url && manualConfig?.key) {
-    return createClient(manualConfig.url, manualConfig.key);
+// Helper para obtener Supabase
+function getSupabase(config?: { url: string, key: string }) {
+  if (config?.url && config?.key) {
+    return createClient(config.url, config.key);
   }
 
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -43,8 +51,8 @@ function getSupabase(manualConfig?: { url: string, key: string }) {
 
 // -- Lógica de Base de Datos --
 
-async function updateSession(id: string, updates: Partial<SessionData>, manualConfig?: { url: string, key: string }) {
-  const supabase = getSupabase(manualConfig);
+async function updateSession(id: string, updates: Partial<SessionData>, sbConfig?: { url: string, key: string }) {
+  const supabase = getSupabase(sbConfig);
   const { error } = await supabase
     .from('sessions')
     .update(updates)
@@ -53,16 +61,16 @@ async function updateSession(id: string, updates: Partial<SessionData>, manualCo
   if (error) console.error('Error actualizando sesión:', error);
 }
 
-async function addMessage(id: string, currentHistory: Message[], newMessage: Message, manualConfig?: { url: string, key: string }) {
+async function addMessage(id: string, currentHistory: Message[], newMessage: Message, sbConfig?: { url: string, key: string }) {
   const updatedHistory = [...currentHistory, newMessage];
-  await updateSession(id, { chat_history: updatedHistory }, manualConfig);
+  await updateSession(id, { chat_history: updatedHistory }, sbConfig);
   return updatedHistory;
 }
 
 // -- Agente 1: Pedro (Ingeniero IA) --
-async function runPedroAgent(companyInfo: string, iteration: number): Promise<string> {
+async function runPedroAgent(companyInfo: string, iteration: number, apiKey?: string): Promise<string> {
   try {
-    const ai = getAI();
+    const ai = getAI(apiKey);
     const modelId = 'gemini-2.5-flash';
     
     const prompt = `
@@ -87,15 +95,14 @@ async function runPedroAgent(companyInfo: string, iteration: number): Promise<st
     return response.text || "No encontré información relevante en esta búsqueda.";
   } catch (error: any) {
     console.error("Error en Agente Pedro:", error);
-    // Devolvemos el mensaje real del error para depuración
     return `[Error del Sistema]: ${error.message}`;
   }
 }
 
 // -- Agente 2: Juan (Project Manager) --
-async function runJuanAgent(companyInfo: string, researchResults: string[]): Promise<string> {
+async function runJuanAgent(companyInfo: string, researchResults: string[], apiKey?: string): Promise<string> {
   try {
-    const ai = getAI();
+    const ai = getAI(apiKey);
     const modelId = 'gemini-2.5-flash';
     
     const prompt = `
@@ -125,16 +132,19 @@ async function runJuanAgent(companyInfo: string, researchResults: string[]): Pro
   }
 }
 
-// -- Orquestador Principal (Simulación LangGraph) --
+// -- Orquestador Principal --
 export async function processUserMessage(
   sessionId: string, 
   userId: string, 
   userContent: string,
-  manualConfig?: { url: string, key: string }
+  config?: ActionConfig
 ) {
-  // Nota: getSupabase no falla si faltan vars, usa placeholder.
-  // Pero processUserMessage debe fallar si no puede conectar.
-  const supabase = getSupabase(manualConfig);
+  // Extraer configuraciones de forma segura
+  // Soportamos tanto el formato nuevo { supabase: {}, geminiApiKey: '' } como el antiguo { url, key }
+  const sbConfig = config?.supabase || (config?.url ? { url: config.url!, key: config.key! } : undefined);
+  const geminiKey = config?.geminiApiKey;
+
+  const supabase = getSupabase(sbConfig);
 
   // 1. Validar sesión
   const { data: session, error } = await supabase
@@ -152,13 +162,13 @@ export async function processUserMessage(
 
   // 2. Guardar mensaje del usuario
   const userMsg: Message = { role: 'user', content: userContent, timestamp: Date.now() };
-  let history = await addMessage(sessionId, currentSession.chat_history, userMsg, manualConfig);
+  let history = await addMessage(sessionId, currentSession.chat_history, userMsg, sbConfig);
 
   // 3. Transición: WAITING -> START_RESEARCH
   await updateSession(sessionId, { 
     company_info: userContent, 
     current_state: 'START_RESEARCH' 
-  }, manualConfig);
+  }, sbConfig);
   
   // Respuesta inicial de Pedro
   await addMessage(sessionId, history, {
@@ -166,7 +176,7 @@ export async function processUserMessage(
     name: 'Pedro',
     content: `Entendido. Comienzo el análisis técnico para "${userContent}".`,
     timestamp: Date.now()
-  }, manualConfig);
+  }, sbConfig);
 
   // Bucle de Investigación (Pedro)
   let researchResults = currentSession.research_results || [];
@@ -174,10 +184,10 @@ export async function processUserMessage(
   const MAX_RESEARCH_LOOPS = 2; 
 
   while (counter < MAX_RESEARCH_LOOPS) {
-    await updateSession(sessionId, { research_counter: counter + 1 }, manualConfig);
+    await updateSession(sessionId, { research_counter: counter + 1 }, sbConfig);
     
-    // Aquí es donde llamamos a la IA. Si getAI falla, devuelve el string de error.
-    const finding = await runPedroAgent(userContent, counter + 1);
+    // Pasamos geminiKey a los agentes
+    const finding = await runPedroAgent(userContent, counter + 1, geminiKey);
     researchResults.push(finding);
     
     // Pedro reporta hallazgo
@@ -186,14 +196,14 @@ export async function processUserMessage(
       name: 'Pedro',
       content: `[Hallazgo #${counter + 1}]: ${finding}`,
       timestamp: Date.now()
-    }, manualConfig);
+    }, sbConfig);
 
-    await updateSession(sessionId, { research_results: researchResults }, manualConfig);
+    await updateSession(sessionId, { research_results: researchResults }, sbConfig);
     counter++;
   }
 
   // 4. Transición: RESEARCH -> START_REPORT (Juan)
-  await updateSession(sessionId, { current_state: 'START_REPORT' }, manualConfig);
+  await updateSession(sessionId, { current_state: 'START_REPORT' }, sbConfig);
 
   // Juan toma el relevo
   await addMessage(sessionId, history, {
@@ -201,9 +211,9 @@ export async function processUserMessage(
     name: 'Juan',
     content: "Gracias Pedro. Excelente trabajo técnico. Procedo a estructurar la estrategia de negocio para el cliente.",
     timestamp: Date.now()
-  }, manualConfig);
+  }, sbConfig);
 
-  const finalReport = await runJuanAgent(userContent, researchResults);
+  const finalReport = await runJuanAgent(userContent, researchResults, geminiKey);
 
   // Juan entrega el reporte
   history = await addMessage(sessionId, history, {
@@ -211,12 +221,12 @@ export async function processUserMessage(
     name: 'Juan',
     content: "Aquí tienes el Informe Ejecutivo Final.",
     timestamp: Date.now()
-  }, manualConfig);
+  }, sbConfig);
 
   // 5. Finalizar
   await updateSession(sessionId, { 
     report_final: finalReport, 
     current_state: 'FINISHED',
     chat_history: history 
-  }, manualConfig);
+  }, sbConfig);
 }
