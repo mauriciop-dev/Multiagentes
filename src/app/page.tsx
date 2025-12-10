@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { supabase as defaultSupabase, createManualClient } from '../lib/supabase/supabase-client';
+import { supabase as defaultSupabase, createManualClient, isEnvConfigured } from '../lib/supabase/supabase-client';
 import ChatUI from '../components/ChatUI';
 import { SessionData } from '../lib/types';
 import { SupabaseClient } from '@supabase/supabase-js';
@@ -33,35 +33,30 @@ export default function Page() {
   const [showManualConfig, setShowManualConfig] = useState(false);
   const [manualUrl, setManualUrl] = useState('');
   const [manualKey, setManualKey] = useState('');
-  const [manualGeminiKey, setManualGeminiKey] = useState(''); // Nuevo estado para Gemini Key
+  const [manualGeminiKey, setManualGeminiKey] = useState(''); 
   const [activeSupabase, setActiveSupabase] = useState<SupabaseClient>(defaultSupabase);
 
-  const attemptConnection = async (client: SupabaseClient) => {
+  // Intentar conectar con un cliente específico
+  const attemptConnection = async (client: SupabaseClient, isManualRetry = false, credentialsToSave?: {url: string, key: string, gemini: string}) => {
     try {
       setLoading(true);
       setErrorMessage('');
-
-      // 0. PRE-CHECK
-      // @ts-ignore
-      const clientUrl = (client as any).supabaseUrl || '';
-      if (clientUrl.includes('placeholder.supabase.co') || clientUrl.includes('placeholder')) {
-         throw new Error("ENV_MISSING"); 
-      }
 
       // 1. Verificar variables básicas y Conexión
       const { data: authData, error: userError } = await client.auth.getUser();
       let userId = authData?.user?.id;
 
       if (!userId) {
+        // Intentar login anónimo
         const { data: anonData, error: anonError } = await client.auth.signInAnonymously();
+        
         if (anonError) {
-          const { error: dbCheckError } = await client.from('sessions').select('count').limit(1);
-          if (dbCheckError && dbCheckError.message && dbCheckError.message.includes('Failed to fetch')) {
+          // Si falla autenticación, verificar si es por red o credenciales
+          const msg = anonError.message || '';
+          if (msg.includes('Failed to fetch') || msg.includes('network')) {
              throw new Error("NETWORK_ERROR");
           }
-          if (!anonData?.user) {
-             throw new Error("AUTH_ERROR");
-          }
+          throw new Error("AUTH_ERROR");
         }
         userId = anonData.user?.id;
       }
@@ -83,25 +78,50 @@ export default function Page() {
         if (dbError) {
           throw new Error(`DB_ERROR: ${dbError.message}`);
         } else {
+          // ÉXITO: Conexión establecida
           setActiveSupabase(client);
           setSessionData(newSession as SessionData);
           setIsDemo(false);
           setShowManualConfig(false);
+
+          // Si fue un intento manual exitoso, guardamos en LocalStorage
+          if (isManualRetry && credentialsToSave) {
+            localStorage.setItem('saved_supabase_url', credentialsToSave.url);
+            localStorage.setItem('saved_supabase_key', credentialsToSave.key);
+            if (credentialsToSave.gemini) {
+              localStorage.setItem('saved_gemini_key', credentialsToSave.gemini);
+            }
+          }
         }
       }
     } catch (error: any) {
       const msg = error.message || '';
-      if (msg !== 'ENV_MISSING' && msg !== 'NETWORK_ERROR') {
-        console.warn("Conexión automática no disponible:", msg);
+      console.warn("Error de conexión:", msg);
+      
+      // Si falló la conexión por defecto, intentamos buscar en LocalStorage
+      if (!isManualRetry) {
+        const savedUrl = localStorage.getItem('saved_supabase_url');
+        const savedKey = localStorage.getItem('saved_supabase_key');
+        const savedGemini = localStorage.getItem('saved_gemini_key');
+
+        if (savedUrl && savedKey) {
+          console.log("Credenciales guardadas encontradas, intentando reconexión automática...");
+          setManualUrl(savedUrl);
+          setManualKey(savedKey);
+          if (savedGemini) setManualGeminiKey(savedGemini);
+          
+          const savedClient = createManualClient(savedUrl, savedKey);
+          return attemptConnection(savedClient, true, { url: savedUrl, key: savedKey, gemini: savedGemini || '' });
+        }
       }
 
       let uiMsg = '';
       if (msg === 'NETWORK_ERROR' || msg.includes('Failed to fetch')) {
-        uiMsg = "No se pudo conectar a Supabase. Verifica tu URL.";
-      } else if (msg === 'ENV_MISSING') {
-        uiMsg = ""; 
+        uiMsg = "Error de red: No se pudo conectar a Supabase. Verifica tu URL.";
       } else if (msg === 'AUTH_ERROR') {
-        uiMsg = "Fallo de autenticación. Verifica tus credenciales.";
+        uiMsg = "Error de autenticación: Verifica tus claves API.";
+      } else if (msg.includes('DB_ERROR')) {
+        uiMsg = "Error de base de datos: Verifica que la tabla 'sessions' exista.";
       } else {
         uiMsg = msg;
       }
@@ -109,6 +129,8 @@ export default function Page() {
       setErrorMessage(uiMsg);
       setIsDemo(true);
       setSessionData(DEMO_SESSION);
+      // Solo mostramos el modal manual si NO están configuradas las variables de entorno
+      // O si falló explícitamente la conexión manual
       setShowManualConfig(true); 
     } finally {
       setLoading(false);
@@ -116,7 +138,25 @@ export default function Page() {
   };
 
   useEffect(() => {
-    attemptConnection(defaultSupabase);
+    // LÓGICA PRINCIPAL DE ARRANQUE
+    if (isEnvConfigured) {
+      console.log("Variables de entorno detectadas. Iniciando conexión automática...");
+      attemptConnection(defaultSupabase);
+    } else {
+      console.log("Variables de entorno no detectadas. Buscando en localStorage...");
+      // Forzar fallo inicial para que busque en localStorage o abra el modal
+      const savedUrl = localStorage.getItem('saved_supabase_url');
+      if (savedUrl) {
+         // Si hay algo guardado, intentamos usarlo (la lógica de fallback ya está en attemptConnection)
+         attemptConnection(defaultSupabase); 
+      } else {
+        // Si no hay env vars ni storage, mostramos demo y config
+        setIsDemo(true);
+        setSessionData(DEMO_SESSION);
+        setShowManualConfig(true);
+        setLoading(false);
+      }
+    }
   }, []);
 
   const handleManualSubmit = (e: React.FormEvent) => {
@@ -136,7 +176,14 @@ export default function Page() {
     setManualGeminiKey(cleanGeminiKey);
 
     const manualClient = createManualClient(cleanUrl, cleanKey);
-    attemptConnection(manualClient);
+    attemptConnection(manualClient, true, { url: cleanUrl, key: cleanKey, gemini: cleanGeminiKey });
+  };
+
+  const handleClearConfig = () => {
+    localStorage.removeItem('saved_supabase_url');
+    localStorage.removeItem('saved_supabase_key');
+    localStorage.removeItem('saved_gemini_key');
+    window.location.reload();
   };
 
   if (loading && !sessionData) {
@@ -144,6 +191,7 @@ export default function Page() {
       <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
         <div className="w-12 h-12 border-4 border-cyan-600 border-t-transparent rounded-full animate-spin mb-4"></div>
         <p className="text-cyan-800 font-semibold animate-pulse">Conectando servicios...</p>
+        {isEnvConfigured && <p className="text-xs text-gray-400 mt-2">Usando configuración de servidor</p>}
       </div>
     );
   }
@@ -154,9 +202,11 @@ export default function Page() {
       {showManualConfig && (
         <div className="absolute top-0 left-0 w-full h-full bg-gray-900/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 overflow-y-auto max-h-[90vh]">
-            <h2 className="text-2xl font-bold text-gray-800 mb-2">Configuración</h2>
+            <h2 className="text-2xl font-bold text-gray-800 mb-2">Configuración Inicial</h2>
             <p className="text-gray-600 text-sm mb-4">
-              Ingresa tus credenciales para iniciar.
+              {isEnvConfigured 
+                ? "Hubo un error conectando con las credenciales del servidor." 
+                : "No se detectaron variables de entorno. Por favor ingrésalas manualmente."}
             </p>
             
             {errorMessage && (
@@ -203,24 +253,17 @@ export default function Page() {
                     placeholder="AIzaSy..."
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-cyan-500 outline-none text-sm"
                   />
-                  <p className="text-xs text-gray-500 mt-1">Opcional si ya configuraste la variable de entorno, pero necesario si ves errores de Key.</p>
+                  <p className="text-xs text-gray-500 mt-1">Opcional si ya está configurada en el servidor.</p>
                 </div>
               </div>
 
               <div className="flex gap-3 mt-6 pt-4">
                 <button 
-                  type="button"
-                  onClick={() => setShowManualConfig(false)}
-                  className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-700 py-2 rounded-lg font-medium transition-colors"
-                >
-                  Usar Demo
-                </button>
-                <button 
                   type="submit"
                   disabled={loading}
-                  className="flex-1 bg-cyan-600 hover:bg-cyan-700 text-white py-2 rounded-lg font-medium transition-colors flex justify-center items-center"
+                  className="flex-1 bg-cyan-600 hover:bg-cyan-700 text-white py-2 rounded-lg font-medium transition-colors flex justify-center items-center shadow-lg shadow-cyan-600/20"
                 >
-                  {loading ? 'Conectando...' : 'Conectar'}
+                  {loading ? 'Verificando...' : 'Guardar y Conectar'}
                 </button>
               </div>
             </form>
@@ -231,10 +274,21 @@ export default function Page() {
       {isDemo && !showManualConfig && (
         <button 
           onClick={() => setShowManualConfig(true)}
-          className="fixed bottom-4 right-4 bg-gray-800 text-white p-3 rounded-full shadow-lg hover:bg-gray-700 z-40"
+          className="fixed bottom-4 right-4 bg-gray-800 text-white p-3 rounded-full shadow-lg hover:bg-gray-700 z-40 transition-transform hover:scale-110"
           title="Configurar Conexión"
         >
           ⚙️
+        </button>
+      )}
+
+      {/* Botón discreto para limpiar credenciales si es necesario (útil para debug o cambio de cuentas) */}
+      {!isDemo && !loading && !isEnvConfigured && (
+        <button 
+          onClick={handleClearConfig}
+          className="fixed bottom-2 right-2 opacity-20 hover:opacity-100 text-xs text-gray-500 hover:text-red-500 z-50"
+          title="Borrar credenciales guardadas"
+        >
+          Reset Config
         </button>
       )}
 
@@ -242,7 +296,6 @@ export default function Page() {
         <ChatUI 
           initialSession={sessionData} 
           customSupabase={activeSupabase}
-          // Pasamos una configuración más robusta que incluye Gemini
           config={{
             supabase: manualUrl && manualKey ? { url: manualUrl, key: manualKey } : undefined,
             geminiApiKey: manualGeminiKey || undefined

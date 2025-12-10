@@ -42,6 +42,7 @@ function formatGenAIError(error: any): string {
 // -- Configuración de Entorno --
 
 function getAI(manualKey?: string) {
+  // Priorizar clave manual si existe, sino usar variable de entorno
   const apiKey = manualKey || process.env.API_KEY;
   
   if (!apiKey) {
@@ -53,18 +54,25 @@ function getAI(manualKey?: string) {
 }
 
 function getSupabase(config?: { url: string, key: string }) {
+  // 1. Si viene configuración manual (desde el cliente), usarla
   if (config?.url && config?.key) {
     return createClient(config.url, config.key);
   }
 
+  // 2. Si no, usar variables de entorno del SERVIDOR (Service Role)
+  // Nota: Service Role permite escritura sin restricciones RLS si es necesario, 
+  // pero aquí lo usamos para asegurar que el server tenga acceso siempre.
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  
+  // 3. Fallback a Anon Key si no hay Service Role (aunque Service Role es recomendado para server actions)
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   
-  if (serviceKey && url && !serviceKey.includes('placeholder')) {
-    return createClient(url, serviceKey);
+  if (url && (serviceKey || anonKey) && !url.includes('placeholder')) {
+    return createClient(url, serviceKey || anonKey!);
   }
   
+  // 4. Último recurso: placeholder (esto fallará las llamadas pero permite compilar)
   return createClient(
     url || 'https://placeholder.supabase.co',
     anonKey || 'placeholder-key'
