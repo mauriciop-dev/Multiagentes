@@ -1,14 +1,23 @@
+'use server';
+
 import { GoogleGenAI } from "@google/genai";
 import { createClient } from '@supabase/supabase-js';
 import { Message, SessionData } from '../lib/types';
 import { supabase as clientSupabase } from '../lib/supabase/supabase-client';
 
+// -- Safe Environment Access --
+const getEnv = (key: string) => {
+  if (typeof process !== 'undefined' && process.env) {
+    return process.env[key];
+  }
+  return '';
+};
+
 // -- Configuración de Entorno --
 
-// Helper para obtener Google AI de forma segura
+// Helper para obtener Google AI de forma segura (Server Side)
 function getAI() {
-  // Intentamos leer API_KEY (Server) o NEXT_PUBLIC_API_KEY (Client fallback)
-  const apiKey = process.env.API_KEY || process.env.NEXT_PUBLIC_API_KEY;
+  const apiKey = getEnv('API_KEY') || getEnv('NEXT_PUBLIC_API_KEY');
   
   if (!apiKey) {
     console.error("FALTA API KEY: Asegúrate de tener 'API_KEY' en tus variables de entorno.");
@@ -17,19 +26,22 @@ function getAI() {
   return new GoogleGenAI({ apiKey });
 }
 
-// Helper para obtener Supabase con permisos de administración (si es posible)
+// Helper para obtener Supabase con permisos de administración
 function getSupabase() {
-  // Solo funciona en el servidor (Node.js)
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceKey = getEnv('SUPABASE_SERVICE_ROLE_KEY');
+  const url = getEnv('NEXT_PUBLIC_SUPABASE_URL');
   
-  // Si tenemos la llave maestra, la usamos para saltarnos las reglas RLS (útil para el agente)
+  // Si tenemos la llave maestra (Service Role), la usamos para saltarnos RLS
   if (serviceKey && url && !serviceKey.includes('placeholder')) {
     return createClient(url, serviceKey);
   }
   
-  // Si estamos en el cliente o falta la llave maestra, usamos el cliente normal
-  return clientSupabase;
+  // Fallback: Si no hay llave maestra, usamos la configuración de cliente (sujeto a RLS)
+  // Esto permite que funcione con Auth Anónima si no se configura la Service Key
+  return createClient(
+    url || 'https://placeholder.supabase.co',
+    getEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY') || 'placeholder-key'
+  );
 }
 
 // -- Lógica de Base de Datos --

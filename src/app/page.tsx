@@ -5,7 +5,7 @@ import { supabase, supabaseUrl, supabaseKey } from '../lib/supabase/supabase-cli
 import ChatUI from '../components/ChatUI';
 import { SessionData } from '../lib/types';
 
-// Mock Data for UI Preview (Solo se usa si fallan las keys)
+// Mock Data for UI Preview (Fallback mode)
 const DEMO_SESSION: SessionData = {
   id: 'demo-session',
   user_id: 'demo-user',
@@ -33,13 +33,19 @@ export default function Page() {
       try {
         console.log("Iniciando conexión a Supabase...");
         
-        // 1. Verificación Estricta de Variables
+        // 1. Verificación de Variables con mensaje claro para Vercel
         if (!supabaseUrl || !supabaseKey || supabaseUrl.includes('placeholder')) {
-          throw new Error("Variables de entorno no detectadas. Ve a Vercel -> Deployments -> Redeploy para que los cambios surtan efecto.");
+           console.warn("Variables de Supabase no detectadas.");
+           setErrorMessage("Faltan las variables de entorno en Vercel (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY).");
+           // No lanzamos error fatal, activamos modo demo para que la UI cargue
+           setIsDemo(true);
+           setSessionData(DEMO_SESSION);
+           setLoading(false);
+           return;
         }
 
         // 2. Autenticación Anónima
-        const { data: authData, error: authError } = await supabase.auth.getUser();
+        const { data: authData } = await supabase.auth.getUser();
         let userId = authData?.user?.id;
 
         if (!userId) {
@@ -48,42 +54,46 @@ export default function Page() {
           
           if (anonError) {
             console.error("Error Auth Anónimo:", anonError);
-            throw new Error(`Error de Autenticación: ${anonError.message}. ¿Habilitaste 'Anonymous Sign-ins' en Supabase Auth?`);
+            // Fallback a demo si auth falla
+            setErrorMessage(`Error Auth: ${anonError.message}. Verifica que 'Anonymous Sign-ins' esté habilitado en Supabase.`);
+            setIsDemo(true);
+            setSessionData(DEMO_SESSION);
+            setLoading(false);
+            return;
           }
           userId = anonData.user?.id;
         }
 
-        if (!userId) throw new Error("No se pudo obtener un ID de usuario.");
+        // 3. Crear o Recuperar Sesión en Base de Datos
+        if (userId) {
+          console.log("Creando sesión para usuario:", userId);
+          const { data: newSession, error: dbError } = await supabase
+            .from('sessions')
+            .insert({
+              user_id: userId,
+              chat_history: [],
+              current_state: 'WAITING_FOR_INFO',
+              research_results: [],
+              research_counter: 0
+            })
+            .select()
+            .single();
 
-        // 3. Crear Sesión en Base de Datos
-        console.log("Creando sesión para usuario:", userId);
-        const { data: newSession, error: dbError } = await supabase
-          .from('sessions')
-          .insert({
-            user_id: userId,
-            chat_history: [],
-            current_state: 'WAITING_FOR_INFO',
-            research_results: [],
-            research_counter: 0
-          })
-          .select()
-          .single();
-
-        if (dbError) {
-          console.error("Error DB Insert:", dbError);
-          if (dbError.code === '42P01') {
-             throw new Error("La tabla 'sessions' no existe. Corre el script SQL en Supabase.");
+          if (dbError) {
+            console.error("Error DB Insert:", dbError);
+            let msg = `Error BD: ${dbError.message}`;
+            if (dbError.code === '42P01') msg = "Tabla 'sessions' no encontrada en Supabase.";
+            if (dbError.code === '42501') msg = "Permiso denegado (RLS) en Supabase.";
+            
+            setErrorMessage(msg);
+            setIsDemo(true);
+            setSessionData(DEMO_SESSION);
+          } else {
+            setSessionData(newSession as SessionData);
           }
-          if (dbError.code === '42501') {
-             throw new Error("Permiso denegado (RLS). Corre el script SQL de Políticas en Supabase.");
-          }
-          throw new Error(`Error BD: ${dbError.message}`);
         }
-        
-        setSessionData(newSession as SessionData);
-
       } catch (error: any) {
-        console.error("Fallo crítico:", error);
+        console.error("Fallo inesperado:", error);
         setErrorMessage(error.message || "Error desconocido");
         setSessionData(DEMO_SESSION);
         setIsDemo(true);
@@ -107,18 +117,22 @@ export default function Page() {
   return (
     <main className="min-h-screen bg-gray-100 p-4 font-sans text-gray-900 relative">
       {isDemo && (
-        <div className="absolute top-0 left-0 w-full bg-red-100 text-red-900 text-sm py-3 px-4 border-b border-red-200 z-50 shadow-sm">
-          <div className="max-w-4xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-2">
-            <div className="flex items-center gap-2">
-              <span className="text-xl">⚠️</span>
+        <div className="absolute top-0 left-0 w-full bg-cyan-900 text-white text-sm py-4 px-4 shadow-md z-50">
+          <div className="max-w-4xl mx-auto">
+            <div className="flex items-start gap-3">
+              <span className="text-2xl">🚧</span>
               <div>
-                <strong>Modo Demo (Sin Conexión):</strong> {errorMessage}
+                <strong className="block text-cyan-200 text-base mb-1">Modo de Visualización (Sin Conexión)</strong>
+                <p className="opacity-90">{errorMessage}</p>
+                <p className="mt-2 text-xs text-cyan-300 font-mono bg-cyan-950/50 p-2 rounded inline-block">
+                  Configura NEXT_PUBLIC_SUPABASE_URL y NEXT_PUBLIC_SUPABASE_ANON_KEY en Vercel.
+                </p>
               </div>
             </div>
           </div>
         </div>
       )}
-      <div className={isDemo ? "mt-16" : ""}>
+      <div className={isDemo ? "mt-24" : ""}>
         {sessionData && <ChatUI initialSession={sessionData} />}
       </div>
     </main>

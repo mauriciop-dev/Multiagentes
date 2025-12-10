@@ -1,17 +1,26 @@
 import { createClient } from '@supabase/supabase-js';
 
-// En Next.js App Router, las variables NEXT_PUBLIC_ se reemplazan en tiempo de build.
-// No uses funciones complejas para leerlas o el bundler puede fallar en detectarlas.
+// Safe environment variable access for hybrid environments (Browser/Server)
+const getEnv = (key: string) => {
+  if (typeof process !== 'undefined' && process.env) {
+    return process.env[key];
+  }
+  return '';
+};
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+// In Next.js, use NEXT_PUBLIC_ prefix for client-side variables
+const supabaseUrl = getEnv('NEXT_PUBLIC_SUPABASE_URL');
+const supabaseKey = getEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY');
 
-// Verificación para depuración en consola del navegador
+// Console warning for debugging in Vercel logs or Browser Console
 if (!supabaseUrl || !supabaseKey) {
-  console.warn('⚠️ Supabase Keys faltantes. Asegúrate de hacer REDEPLOY en Vercel después de agregar las variables.');
+  console.warn(
+    '⚠️ Supabase Environment Variables missing. Check your Vercel Project Settings.\n' +
+    'Required: NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY'
+  );
 }
 
-// Usamos un fallback vacío para que el build no rompa, pero la app validará en runtime (page.tsx)
+// Create client with fallback to prevent immediate crash, validated in page.tsx
 export const supabase = createClient(
   supabaseUrl || 'https://placeholder.supabase.co',
   supabaseKey || 'placeholder-key'
