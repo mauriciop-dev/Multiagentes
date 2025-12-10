@@ -34,12 +34,16 @@ export default function Page() {
   const [showManualConfig, setShowManualConfig] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   
-  // Inputs Manuales
+  // Inputs Manuales / Credenciales Activas
   const [manualUrl, setManualUrl] = useState('');
   const [manualKey, setManualKey] = useState('');
   const [manualGeminiKey, setManualGeminiKey] = useState(''); 
 
-  const connectWithClient = async (client: SupabaseClient, credentials?: {url: string, key: string, gemini?: string}) => {
+  // Esta bandera nos dice si debemos forzar el envío de credenciales al servidor
+  // (porque el servidor dijo que no las tenía)
+  const [forceClientConfig, setForceClientConfig] = useState(false);
+
+  const connectWithClient = async (client: SupabaseClient, credentials?: {url: string, key: string, gemini?: string}, isRetry = false) => {
     try {
       setErrorMessage('');
       setLoading(true);
@@ -69,6 +73,7 @@ export default function Page() {
 
       if (dbError) throw new Error(`DB_FAIL: ${dbError.message}`);
 
+      // ÉXITO
       setActiveSupabase(client);
       setSessionData(newSession as SessionData);
       setIsDemo(false);
@@ -76,9 +81,17 @@ export default function Page() {
       setLoading(false);
 
       if (credentials) {
-        localStorage.setItem('saved_supabase_url', credentials.url);
-        localStorage.setItem('saved_supabase_key', credentials.key);
-        if (credentials.gemini) localStorage.setItem('saved_gemini_key', credentials.gemini);
+        // Actualizamos los estados que se pasarán al ChatUI
+        setManualUrl(credentials.url);
+        setManualKey(credentials.key);
+        if (credentials.gemini) setManualGeminiKey(credentials.gemini);
+
+        // Guardar persistencia si fue manual
+        if (isRetry) {
+          localStorage.setItem('saved_supabase_url', credentials.url);
+          localStorage.setItem('saved_supabase_key', credentials.key);
+          if (credentials.gemini) localStorage.setItem('saved_gemini_key', credentials.gemini);
+        }
       }
 
     } catch (err: any) {
@@ -102,33 +115,69 @@ export default function Page() {
       setLoading(true);
       
       try {
-        console.log("⚡ Verificando variables de entorno en el servidor...");
-        // Esta función ahora busca SUPABASE_URL (sin NEXT_PUBLIC) como fallback
+        console.log("⚡ Fase 1: Diagnóstico de Servidor...");
         const serverConfig = await getServerConfig();
 
-        if (serverConfig.isConfigured && serverConfig.supabaseUrl && serverConfig.supabaseAnonKey) {
-          console.log("✅ Credenciales encontradas en el servidor.");
-          const serverClient = createManualClient(serverConfig.supabaseUrl, serverConfig.supabaseAnonKey);
-          await connectWithClient(serverClient);
-        } else {
-          console.warn("⚠️ Servidor reporta variables incompletas.");
-          throw new Error("SERVER_MISSING_CONFIG");
-        }
-      } catch (err) {
-        // Fallback: LocalStorage
-        const savedUrl = localStorage.getItem('saved_supabase_url');
-        const savedKey = localStorage.getItem('saved_supabase_key');
+        // 1. Recolectar credenciales potenciales
+        // Prioridad: Servidor > Cliente (Build Env) > LocalStorage
         
-        if (savedUrl && savedKey) {
-          const localClient = createManualClient(savedUrl, savedKey);
-          await connectWithClient(localClient, { url: savedUrl, key: savedKey, gemini: '' });
-        } else {
-          // Fallback final: Modo Demo
-          setIsDemo(true);
-          setSessionData(DEMO_SESSION);
-          setShowManualConfig(true);
-          setLoading(false);
+        const serverUrl = serverConfig.supabaseUrl;
+        const serverKey = serverConfig.supabaseAnonKey;
+        
+        const clientEnvUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+        const clientEnvKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+        
+        const storedUrl = localStorage.getItem('saved_supabase_url');
+        const storedKey = localStorage.getItem('saved_supabase_key');
+        const storedGemini = localStorage.getItem('saved_gemini_key');
+
+        let finalUrl = '';
+        let finalKey = '';
+        let source = '';
+
+        if (serverUrl && serverKey) {
+          finalUrl = serverUrl;
+          finalKey = serverKey;
+          source = 'server';
+        } else if (clientEnvUrl && clientEnvKey) {
+          console.log("⚠️ Servidor sin credenciales, usando Client Env Vars.");
+          finalUrl = clientEnvUrl;
+          finalKey = clientEnvKey;
+          source = 'client-env';
+          // IMPORTANTE: Si las sacamos del cliente, debemos forzar su envío al servidor
+          // porque el servidor ya admitió que no las tiene.
+          setForceClientConfig(true);
+        } else if (storedUrl && storedKey) {
+          console.log("⚠️ Usando credenciales guardadas en LocalStorage.");
+          finalUrl = storedUrl;
+          finalKey = storedKey;
+          source = 'storage';
+          setForceClientConfig(true);
         }
+
+        console.log(`Estrategia de conexión: ${source || 'Ninguna (Fallo)'}`);
+
+        if (finalUrl && finalKey) {
+          const client = createManualClient(finalUrl, finalKey);
+          // Si el servidor ya tiene Gemini (serverConfig.hasGeminiKey), no necesitamos pedirlo
+          const geminiNeeded = !serverConfig.hasGeminiKey && !storedGemini; 
+          
+          await connectWithClient(client, { 
+            url: finalUrl, 
+            key: finalKey, 
+            gemini: storedGemini || '' 
+          });
+        } else {
+          throw new Error("NO_CREDENTIALS_FOUND");
+        }
+
+      } catch (err) {
+        console.warn("Fallo en inicialización automática:", err);
+        // Fallback final: Modo Demo
+        setIsDemo(true);
+        setSessionData(DEMO_SESSION);
+        setShowManualConfig(true);
+        setLoading(false);
       }
     };
 
@@ -145,22 +194,36 @@ export default function Page() {
     const cleanKey = manualKey.trim();
 
     const newClient = createManualClient(cleanUrl, cleanKey);
+    // Al hacerlo manual, siempre forzamos el envío de config
+    setForceClientConfig(true); 
+    
     connectWithClient(newClient, { 
       url: cleanUrl, 
       key: cleanKey, 
       gemini: manualGeminiKey 
-    });
+    }, true);
   };
 
   if (loading && !sessionData) {
     return (
       <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
         <div className="w-16 h-16 border-4 border-cyan-600 border-t-transparent rounded-full animate-spin mb-6"></div>
-        <h2 className="text-xl font-bold text-gray-800 mb-2">Iniciando Sistema</h2>
-        <p className="text-gray-500 text-sm">Autenticando servicios seguros...</p>
+        <h2 className="text-xl font-bold text-gray-800 mb-2">Iniciando Consultoría</h2>
+        <p className="text-gray-500 text-sm">Sincronizando agentes y base de datos...</p>
       </div>
     );
   }
+
+  // Lógica para decidir qué config pasar al ChatUI
+  // Si forceClientConfig es true, pasamos explícitamente url/key.
+  // Si no, pasamos undefined (asumiendo que el server las tiene).
+  // Gemini key se pasa si es manual.
+  const chatConfig = forceClientConfig ? {
+    supabase: { url: manualUrl, key: manualKey },
+    geminiApiKey: manualGeminiKey || undefined
+  } : {
+    geminiApiKey: manualGeminiKey || undefined
+  };
 
   return (
     <main className="min-h-screen bg-gray-100 p-4 font-sans text-gray-900 relative">
@@ -168,9 +231,9 @@ export default function Page() {
       {showManualConfig && (
         <div className="absolute top-0 left-0 w-full h-full bg-gray-900/90 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-8 max-h-[90vh] overflow-y-auto">
-            <h2 className="text-2xl font-bold text-gray-800 mb-2">Configuración Necesaria</h2>
+            <h2 className="text-2xl font-bold text-gray-800 mb-2">Conexión Requerida</h2>
             <p className="text-gray-600 mb-6 text-sm">
-              El sistema no detectó las variables de entorno automáticamente. Esto es común si acabas de desplegar.
+              El sistema necesita conectarse a tu base de datos Supabase para guardar el historial y coordinar a los agentes.
             </p>
 
             {errorMessage && (
@@ -178,11 +241,6 @@ export default function Page() {
                 {errorMessage}
               </div>
             )}
-
-            <div className="mb-6 bg-blue-50 border border-blue-100 rounded-lg p-3 text-xs text-blue-800">
-              <strong>Tip de Producción:</strong> Si ya configuraste las variables en Vercel, intenta hacer un 
-              <strong> Redeploy</strong> asegurándote de no usar la caché de compilación, o simplemente ingrésalas aquí una vez (se guardarán en tu navegador).
-            </div>
 
             <form onSubmit={handleManualSubmit} className="space-y-5">
               <div>
@@ -215,6 +273,9 @@ export default function Page() {
                   placeholder="AIzaSy..."
                   className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-cyan-500 outline-none transition-all"
                 />
+                <p className="text-xs text-gray-400 mt-1">
+                  El servidor {manualGeminiKey ? 'usará esta clave.' : 'intentará usar su clave interna.'}
+                </p>
               </div>
 
               <button 
@@ -242,10 +303,7 @@ export default function Page() {
         <ChatUI 
           initialSession={sessionData} 
           customSupabase={activeSupabase || placeholderSupabase}
-          config={{
-            supabase: manualUrl && manualKey ? { url: manualUrl, key: manualKey } : undefined,
-            geminiApiKey: manualGeminiKey || undefined
-          }}
+          config={chatConfig}
         />
       )}
     </main>
