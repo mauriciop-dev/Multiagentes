@@ -8,17 +8,17 @@ import { Message, SessionData } from '../lib/types';
 
 // Helper para obtener Google AI de forma segura (Server Side)
 function getAI() {
-  // Intentamos todas las variantes posibles de variables de entorno
-  const apiKey = 
-    process.env.API_KEY || 
-    process.env.NEXT_PUBLIC_API_KEY ||
-    // @ts-ignore: Acceso directo por si el bundler no reemplaza process.env
-    (typeof process !== 'undefined' && process.env ? process.env['API_KEY'] : undefined);
+  // Intentamos obtener la API KEY de las variables de entorno.
+  // Nota: En Next.js Server Actions, process.env.API_KEY debería estar disponible.
+  const apiKey = process.env.API_KEY;
   
-  // En lugar de lanzar error aquí, usamos un dummy si no existe.
-  // Esto permite instanciar el cliente y que el error real ("Invalid Key") venga de la llamada a la API.
-  // Es útil para debugging en entornos donde las env vars son inestables.
-  return new GoogleGenAI({ apiKey: apiKey || 'dummy-key-for-debugging' });
+  if (!apiKey) {
+    console.error("CRITICAL ERROR: 'API_KEY' environment variable is missing.");
+    // Lanzamos un error descriptivo para que se refleje en la UI
+    throw new Error("La variable de entorno API_KEY no está configurada en el servidor.");
+  }
+  
+  return new GoogleGenAI({ apiKey });
 }
 
 // Helper para obtener Supabase con permisos de administración
@@ -61,21 +61,21 @@ async function addMessage(id: string, currentHistory: Message[], newMessage: Mes
 
 // -- Agente 1: Pedro (Ingeniero IA) --
 async function runPedroAgent(companyInfo: string, iteration: number): Promise<string> {
-  const ai = getAI();
-  const modelId = 'gemini-2.5-flash';
-  
-  const prompt = `
-    Eres Pedro, un consultor técnico experto en IA e Ingeniería.
-    Objetivo: Investigar oportunidades técnicas para: "${companyInfo}".
-    Iteración de investigación: ${iteration}.
-    
-    Instrucciones:
-    1. Busca tecnologías recientes, patentes o casos de uso digitales relevantes.
-    2. Sé técnico, preciso y analítico.
-    3. Máximo 150 palabras.
-  `;
-
   try {
+    const ai = getAI();
+    const modelId = 'gemini-2.5-flash';
+    
+    const prompt = `
+      Eres Pedro, un consultor técnico experto en IA e Ingeniería.
+      Objetivo: Investigar oportunidades técnicas para: "${companyInfo}".
+      Iteración de investigación: ${iteration}.
+      
+      Instrucciones:
+      1. Busca tecnologías recientes, patentes o casos de uso digitales relevantes.
+      2. Sé técnico, preciso y analítico.
+      3. Máximo 150 palabras.
+    `;
+
     const response = await ai.models.generateContent({
       model: modelId,
       contents: prompt,
@@ -87,44 +87,41 @@ async function runPedroAgent(companyInfo: string, iteration: number): Promise<st
     return response.text || "No encontré información relevante en esta búsqueda.";
   } catch (error: any) {
     console.error("Error en Agente Pedro:", error);
-    // Si la key es dummy, el error será 400. Devolvemos un mensaje claro.
-    if (error.message?.includes('400') || error.message?.includes('API key')) {
-      return "Error: API KEY de Gemini inválida o no encontrada.";
-    }
-    return "Error técnico al consultar fuentes externas.";
+    // Devolvemos el mensaje real del error para depuración
+    return `[Error del Sistema]: ${error.message}`;
   }
 }
 
 // -- Agente 2: Juan (Project Manager) --
 async function runJuanAgent(companyInfo: string, researchResults: string[]): Promise<string> {
-  const ai = getAI();
-  const modelId = 'gemini-2.5-flash';
-  
-  const prompt = `
-    Eres Juan, un Project Manager Senior y Estratega Digital.
-    
-    Contexto del Cliente: "${companyInfo}"
-    
-    Hallazgos Técnicos (de Pedro):
-    ${researchResults.map((r, i) => `- ${r}`).join('\n')}
-    
-    Tu Tarea:
-    Generar un Informe Ejecutivo Final en Markdown.
-    1. Resumen Ejecutivo: Traduce los hallazgos técnicos a valor de negocio.
-    2. Propuesta de Valor: 3 Soluciones de IA concretas y rentables.
-    3. Tono: Profesional, empático, orientado a resultados.
-  `;
-
   try {
+    const ai = getAI();
+    const modelId = 'gemini-2.5-flash';
+    
+    const prompt = `
+      Eres Juan, un Project Manager Senior y Estratega Digital.
+      
+      Contexto del Cliente: "${companyInfo}"
+      
+      Hallazgos Técnicos (de Pedro):
+      ${researchResults.map((r, i) => `- ${r}`).join('\n')}
+      
+      Tu Tarea:
+      Generar un Informe Ejecutivo Final en Markdown.
+      1. Resumen Ejecutivo: Traduce los hallazgos técnicos a valor de negocio.
+      2. Propuesta de Valor: 3 Soluciones de IA concretas y rentables.
+      3. Tono: Profesional, empático, orientado a resultados.
+    `;
+
     const response = await ai.models.generateContent({
       model: modelId,
       contents: prompt,
     });
 
     return response.text || "No se pudo generar el informe final.";
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error en Agente Juan:", error);
-    return "Error al redactar el informe final.";
+    return `[Error del Sistema]: ${error.message}`;
   }
 }
 
@@ -133,8 +130,10 @@ export async function processUserMessage(
   sessionId: string, 
   userId: string, 
   userContent: string,
-  manualConfig?: { url: string, key: string } // Nuevo parámetro para credenciales manuales
+  manualConfig?: { url: string, key: string }
 ) {
+  // Nota: getSupabase no falla si faltan vars, usa placeholder.
+  // Pero processUserMessage debe fallar si no puede conectar.
   const supabase = getSupabase(manualConfig);
 
   // 1. Validar sesión
@@ -146,7 +145,7 @@ export async function processUserMessage(
 
   if (error || !session) {
     console.error("Error buscando sesión:", error);
-    throw new Error("No se encontró la sesión activa. Es posible que el servidor esté buscando en una base de datos diferente a la del navegador.");
+    throw new Error("No se encontró la sesión activa. Verifica tu conexión a Supabase.");
   }
 
   let currentSession = session as SessionData;
@@ -172,11 +171,12 @@ export async function processUserMessage(
   // Bucle de Investigación (Pedro)
   let researchResults = currentSession.research_results || [];
   let counter = 0;
-  const MAX_RESEARCH_LOOPS = 2; // Cantidad de búsquedas
+  const MAX_RESEARCH_LOOPS = 2; 
 
   while (counter < MAX_RESEARCH_LOOPS) {
     await updateSession(sessionId, { research_counter: counter + 1 }, manualConfig);
     
+    // Aquí es donde llamamos a la IA. Si getAI falla, devuelve el string de error.
     const finding = await runPedroAgent(userContent, counter + 1);
     researchResults.push(finding);
     
