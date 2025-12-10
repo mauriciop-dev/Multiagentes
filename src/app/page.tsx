@@ -23,6 +23,13 @@ const DEMO_SESSION: SessionData = {
   research_counter: 1
 };
 
+// Helper para mostrar claves de forma segura (Masking)
+const maskKey = (key?: string) => {
+  if (!key) return 'No definida';
+  if (key.length < 10) return key; // Si es muy corta (ej. 'placeholder') mostrarla
+  return `${key.substring(0, 5)}...${key.substring(key.length - 4)}`;
+};
+
 export default function Page() {
   const [sessionData, setSessionData] = useState<SessionData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -51,6 +58,7 @@ export default function Page() {
         const { data: anonData, error: anonError } = await client.auth.signInAnonymously();
         
         if (anonError) {
+          console.error("Error Auth Anónimo:", anonError);
           // Si falla autenticación, verificar si es por red o credenciales
           const msg = anonError.message || '';
           if (msg.includes('Failed to fetch') || msg.includes('network')) {
@@ -98,7 +106,7 @@ export default function Page() {
       const msg = error.message || '';
       console.warn("Error de conexión:", msg);
       
-      // Si falló la conexión por defecto, intentamos buscar en LocalStorage
+      // Si falló la conexión por defecto (Variables de Entorno), intentamos buscar en LocalStorage
       if (!isManualRetry) {
         const savedUrl = localStorage.getItem('saved_supabase_url');
         const savedKey = localStorage.getItem('saved_supabase_key');
@@ -119,9 +127,9 @@ export default function Page() {
       if (msg === 'NETWORK_ERROR' || msg.includes('Failed to fetch')) {
         uiMsg = "Error de red: No se pudo conectar a Supabase. Verifica tu URL.";
       } else if (msg === 'AUTH_ERROR') {
-        uiMsg = "Error de autenticación: Verifica tus claves API.";
+        uiMsg = "Error de autenticación: Las credenciales son rechazadas por Supabase.";
       } else if (msg.includes('DB_ERROR')) {
-        uiMsg = "Error de base de datos: Verifica que la tabla 'sessions' exista.";
+        uiMsg = `Error de base de datos: ${msg.replace('DB_ERROR: ', '')}`;
       } else {
         uiMsg = msg;
       }
@@ -129,6 +137,7 @@ export default function Page() {
       setErrorMessage(uiMsg);
       setIsDemo(true);
       setSessionData(DEMO_SESSION);
+      // Siempre mostramos el modal si falla la conexión automática
       setShowManualConfig(true); 
     } finally {
       setLoading(false);
@@ -185,10 +194,14 @@ export default function Page() {
       <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
         <div className="w-12 h-12 border-4 border-cyan-600 border-t-transparent rounded-full animate-spin mb-4"></div>
         <p className="text-cyan-800 font-semibold animate-pulse">Conectando servicios...</p>
-        {isEnvConfigured && <p className="text-xs text-gray-400 mt-2">Usando configuración de servidor</p>}
+        {isEnvConfigured && <p className="text-xs text-gray-400 mt-2">Intentando conexión con variables del servidor...</p>}
       </div>
     );
   }
+
+  // Debugging helpers
+  const envUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const envKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
   return (
     <main className="min-h-screen bg-gray-100 p-4 font-sans text-gray-900 relative">
@@ -199,33 +212,51 @@ export default function Page() {
             <h2 className="text-2xl font-bold text-gray-800 mb-2">Configuración Inicial</h2>
             <p className="text-gray-600 text-sm mb-4">
               {isEnvConfigured 
-                ? "Hubo un error conectando con las credenciales del servidor." 
-                : "No se detectaron variables de entorno pre-configuradas."}
+                ? "Las variables existen pero la conexión falló." 
+                : "Variables de entorno no detectadas."}
             </p>
             
-            {/* DEBUG PANEL: Muestra visualmente qué variables detecta Next.js */}
-            <div className="mb-6 p-3 bg-gray-50 border border-gray-200 rounded-lg text-xs font-mono">
-              <p className="font-bold text-gray-500 mb-2 uppercase tracking-wider">Diagnóstico de Variables:</p>
-              <div className="flex justify-between items-center mb-1">
-                <span>NEXT_PUBLIC_SUPABASE_URL:</span>
-                <span className={process.env.NEXT_PUBLIC_SUPABASE_URL ? "text-green-600 font-bold" : "text-red-500 font-bold"}>
-                  {process.env.NEXT_PUBLIC_SUPABASE_URL ? "✅ Detectada" : "❌ No Detectada"}
-                </span>
+            {/* DEBUG PANEL AVANZADO */}
+            <div className="mb-6 p-4 bg-slate-100 border border-slate-300 rounded-lg text-xs font-mono">
+              <p className="font-bold text-slate-600 mb-3 uppercase tracking-wider border-b border-slate-200 pb-1">Diagnóstico de Variables (Vercel):</p>
+              
+              <div className="flex flex-col gap-2 mb-2">
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-500">URL:</span>
+                  <span className={envUrl ? "text-green-700 font-bold bg-green-100 px-1 rounded" : "text-red-600 font-bold bg-red-100 px-1 rounded"}>
+                    {maskKey(envUrl)} {envUrl ? '✅' : '❌'}
+                  </span>
+                </div>
+                
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-500">Anon Key:</span>
+                  <span className={envKey ? "text-green-700 font-bold bg-green-100 px-1 rounded" : "text-red-600 font-bold bg-red-100 px-1 rounded"}>
+                    {maskKey(envKey)} {envKey ? '✅' : '❌'}
+                  </span>
+                </div>
               </div>
-              <div className="flex justify-between items-center">
-                <span>NEXT_PUBLIC_SUPABASE_ANON_KEY:</span>
-                <span className={process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? "text-green-600 font-bold" : "text-red-500 font-bold"}>
-                  {process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? "✅ Detectada" : "❌ No Detectada"}
-                </span>
-              </div>
+
+              {isEnvConfigured && errorMessage && (
+                <p className="mt-3 text-red-600 leading-relaxed">
+                  <strong>Diagnóstico:</strong> El código lee las variables (mira arriba), pero Supabase rechazó la conexión.
+                  <br/>Posibles causas:
+                  <ul className="list-disc ml-4 mt-1">
+                    <li>La URL del proyecto no coincide con la Key.</li>
+                    <li>Base de datos pausada en Supabase.</li>
+                    <li>"Enable Anonymous Sign-ins" desactivado en Auth Settings.</li>
+                  </ul>
+                </p>
+              )}
+
               {!isEnvConfigured && (
-                <p className="mt-2 text-gray-400 italic">
-                  Si ya las pusiste en Vercel pero salen con ❌, necesitas hacer un <strong>Redeploy</strong>.
+                <p className="mt-2 text-orange-600 italic">
+                  Las variables no llegaron al navegador. 
+                  Si ya hiciste redeploy, intenta borrar caché del navegador o probar en modo incógnito.
                 </p>
               )}
             </div>
             
-            {errorMessage && (
+            {errorMessage && !isEnvConfigured && (
               <div className="bg-red-50 border-l-4 border-red-500 p-3 mb-4 text-xs text-red-700 font-mono break-words">
                 {errorMessage}
               </div>
@@ -269,7 +300,9 @@ export default function Page() {
                     placeholder="AIzaSy..."
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-cyan-500 outline-none text-sm"
                   />
-                  <p className="text-xs text-gray-500 mt-1">Opcional si ya está configurada en el servidor.</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Déjalo vacío si ya configuraste <code className="bg-gray-100 px-1 rounded">API_KEY</code> en Vercel.
+                  </p>
                 </div>
               </div>
 
