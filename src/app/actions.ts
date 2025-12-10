@@ -5,19 +5,12 @@ import { createClient } from '@supabase/supabase-js';
 import { Message, SessionData } from '../lib/types';
 import { supabase as clientSupabase } from '../lib/supabase/supabase-client';
 
-// -- Safe Environment Access --
-const getEnv = (key: string) => {
-  if (typeof process !== 'undefined' && process.env) {
-    return process.env[key];
-  }
-  return '';
-};
-
 // -- Configuración de Entorno --
 
 // Helper para obtener Google AI de forma segura (Server Side)
 function getAI() {
-  const apiKey = getEnv('API_KEY') || getEnv('NEXT_PUBLIC_API_KEY');
+  // Acceso directo para garantizar que Next.js/Vercel inyecte el valor
+  const apiKey = process.env.API_KEY || process.env.NEXT_PUBLIC_API_KEY;
   
   if (!apiKey) {
     console.error("FALTA API KEY: Asegúrate de tener 'API_KEY' en tus variables de entorno.");
@@ -28,19 +21,20 @@ function getAI() {
 
 // Helper para obtener Supabase con permisos de administración
 function getSupabase() {
-  const serviceKey = getEnv('SUPABASE_SERVICE_ROLE_KEY');
-  const url = getEnv('NEXT_PUBLIC_SUPABASE_URL');
+  // Acceso directo a variables de entorno
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   
   // Si tenemos la llave maestra (Service Role), la usamos para saltarnos RLS
   if (serviceKey && url && !serviceKey.includes('placeholder')) {
     return createClient(url, serviceKey);
   }
   
-  // Fallback: Si no hay llave maestra, usamos la configuración de cliente (sujeto a RLS)
-  // Esto permite que funcione con Auth Anónima si no se configura la Service Key
+  // Fallback: Cliente estándar con clave anónima
   return createClient(
     url || 'https://placeholder.supabase.co',
-    getEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY') || 'placeholder-key'
+    anonKey || 'placeholder-key'
   );
 }
 

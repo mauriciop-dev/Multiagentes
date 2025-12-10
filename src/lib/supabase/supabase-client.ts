@@ -1,26 +1,22 @@
 import { createClient } from '@supabase/supabase-js';
 
-// Safe environment variable access for hybrid environments (Browser/Server)
-const getEnv = (key: string) => {
-  if (typeof process !== 'undefined' && process.env) {
-    return process.env[key];
-  }
-  return '';
-};
+// CRÍTICO PARA NEXT.JS:
+// Las variables NEXT_PUBLIC_ deben accederse explícitamente con process.env.NOMBRE
+// para que el bundler las reemplace en tiempo de construcción.
+// No usar funciones intermedias (como getEnv) para estas variables.
 
-// In Next.js, use NEXT_PUBLIC_ prefix for client-side variables
-const supabaseUrl = getEnv('NEXT_PUBLIC_SUPABASE_URL');
-const supabaseKey = getEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY');
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-// Console warning for debugging in Vercel logs or Browser Console
+// Advertencia en consola si faltan (ayuda a depurar en local y Vercel)
 if (!supabaseUrl || !supabaseKey) {
   console.warn(
-    '⚠️ Supabase Environment Variables missing. Check your Vercel Project Settings.\n' +
-    'Required: NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY'
+    '⚠️ Variables de Supabase no detectadas. \n' +
+    'Asegúrate de que NEXT_PUBLIC_SUPABASE_URL y NEXT_PUBLIC_SUPABASE_ANON_KEY estén configuradas en Vercel o .env.local'
   );
 }
 
-// Create client with fallback to prevent immediate crash, validated in page.tsx
+// Cliente robusto con fallback para evitar crash inicial
 export const supabase = createClient(
   supabaseUrl || 'https://placeholder.supabase.co',
   supabaseKey || 'placeholder-key'
