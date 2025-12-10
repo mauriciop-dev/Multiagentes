@@ -13,6 +13,17 @@ interface ActionConfig {
   key?: string;
 }
 
+// NUEVO: Función para rescatar la configuración del servidor
+// Esto soluciona el problema de que el navegador no vea las variables NEXT_PUBLIC
+export async function getServerConfig() {
+  return {
+    supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL || null,
+    supabaseAnonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || null,
+    hasGeminiKey: !!process.env.API_KEY, // Solo devolvemos true/false por seguridad
+    isConfigured: !!(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY)
+  };
+}
+
 // -- Helpers de Errores --
 
 function formatGenAIError(error: any): string {
