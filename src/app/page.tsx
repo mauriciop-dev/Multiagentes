@@ -36,7 +36,7 @@ export default function Page() {
         // 1. Verificación de Variables con mensaje claro para Vercel
         if (!supabaseUrl || !supabaseKey || supabaseUrl.includes('placeholder')) {
            console.warn("Variables de Supabase no detectadas.");
-           setErrorMessage("Faltan las variables de entorno en Vercel (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY).");
+           setErrorMessage("Faltan variables de entorno en Vercel.");
            // No lanzamos error fatal, activamos modo demo para que la UI cargue
            setIsDemo(true);
            setSessionData(DEMO_SESSION);
@@ -82,8 +82,8 @@ export default function Page() {
           if (dbError) {
             console.error("Error DB Insert:", dbError);
             let msg = `Error BD: ${dbError.message}`;
-            if (dbError.code === '42P01') msg = "Tabla 'sessions' no encontrada en Supabase.";
-            if (dbError.code === '42501') msg = "Permiso denegado (RLS) en Supabase.";
+            if (dbError.code === '42P01') msg = "Tabla 'sessions' no encontrada en Supabase (Corre el script SQL).";
+            if (dbError.code === '42501') msg = "Permiso denegado (RLS) en Supabase (Corre el script SQL).";
             
             setErrorMessage(msg);
             setIsDemo(true);
@@ -117,22 +117,34 @@ export default function Page() {
   return (
     <main className="min-h-screen bg-gray-100 p-4 font-sans text-gray-900 relative">
       {isDemo && (
-        <div className="absolute top-0 left-0 w-full bg-cyan-900 text-white text-sm py-4 px-4 shadow-md z-50">
-          <div className="max-w-4xl mx-auto">
-            <div className="flex items-start gap-3">
-              <span className="text-2xl">🚧</span>
-              <div>
-                <strong className="block text-cyan-200 text-base mb-1">Modo de Visualización (Sin Conexión)</strong>
-                <p className="opacity-90">{errorMessage}</p>
-                <p className="mt-2 text-xs text-cyan-300 font-mono bg-cyan-950/50 p-2 rounded inline-block">
-                  Configura NEXT_PUBLIC_SUPABASE_URL y NEXT_PUBLIC_SUPABASE_ANON_KEY en Vercel.
-                </p>
+        <div className="absolute top-0 left-0 w-full bg-cyan-900 text-white shadow-md z-50">
+          <div className="max-w-4xl mx-auto p-4 flex flex-col sm:flex-row items-start gap-4">
+            <div className="text-3xl">🚧</div>
+            <div className="flex-1">
+              <strong className="block text-cyan-200 text-lg mb-1">Modo de Visualización (Sin Conexión)</strong>
+              <p className="opacity-90 mb-2">{errorMessage}</p>
+              
+              <div className="bg-cyan-950/40 p-3 rounded-lg border border-cyan-700/50 text-sm space-y-2">
+                <p className="font-semibold text-cyan-300">Solución en Vercel:</p>
+                <ol className="list-decimal list-inside text-cyan-100/80 space-y-1 ml-1">
+                  <li>Ve a <strong>Settings &gt; Environment Variables</strong></li>
+                  <li>Agrega: <code className="bg-cyan-950 px-1 rounded">NEXT_PUBLIC_SUPABASE_URL</code></li>
+                  <li>Agrega: <code className="bg-cyan-950 px-1 rounded">NEXT_PUBLIC_SUPABASE_ANON_KEY</code></li>
+                  <li>Agrega: <code className="bg-cyan-950 px-1 rounded">API_KEY</code> (Google Gemini)</li>
+                  <li className="text-white font-bold">Importante: Ve a Deployments y haz REDEPLOY</li>
+                </ol>
               </div>
             </div>
+            <button 
+              onClick={() => window.location.reload()}
+              className="mt-2 sm:mt-0 bg-cyan-500 hover:bg-cyan-400 text-white font-semibold py-2 px-4 rounded-lg shadow transition-colors text-sm whitespace-nowrap"
+            >
+              🔄 Recargar Página
+            </button>
           </div>
         </div>
       )}
-      <div className={isDemo ? "mt-24" : ""}>
+      <div className={isDemo ? "mt-48 sm:mt-40 transition-all" : ""}>
         {sessionData && <ChatUI initialSession={sessionData} />}
       </div>
     </main>

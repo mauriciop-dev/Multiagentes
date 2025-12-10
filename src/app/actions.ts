@@ -3,7 +3,6 @@
 import { GoogleGenAI } from "@google/genai";
 import { createClient } from '@supabase/supabase-js';
 import { Message, SessionData } from '../lib/types';
-import { supabase as clientSupabase } from '../lib/supabase/supabase-client';
 
 // -- Configuración de Entorno --
 

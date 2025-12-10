@@ -12,7 +12,7 @@ export default function ChatUI({ initialSession }: ChatUIProps) {
   const [session, setSession] = useState<SessionData>(initialSession);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [demoWarning, setDemoWarning] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
   const isDemo = session.id === 'demo-session';
 
@@ -49,11 +49,10 @@ export default function ChatUI({ initialSession }: ChatUIProps) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || loading) return;
+    setErrorMsg('');
 
     if (isDemo) {
-      // Replaced blocking alert() with state-based warning to fix INP issues
-      setDemoWarning("Funcionalidad deshabilitada en Modo Demo. Conecta Supabase y Gemini para continuar.");
-      setTimeout(() => setDemoWarning(''), 5000);
+      setErrorMsg("Funcionalidad deshabilitada en Modo Demo. Configura las variables en Vercel para continuar.");
       return;
     }
 
@@ -64,9 +63,14 @@ export default function ChatUI({ initialSession }: ChatUIProps) {
     try {
       // Optimistic update (optional, but waiting for DB update is safer for consistency here)
       await processUserMessage(session.id, session.user_id, userText);
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      alert("Hubo un error al procesar tu solicitud.");
+      const msg = error.message || "Error desconocido";
+      if (msg.includes("API_KEY")) {
+        setErrorMsg("Error de Configuración: Falta la API_KEY de Gemini en Vercel.");
+      } else {
+        setErrorMsg(`Error: ${msg}`);
+      }
     } finally {
       setLoading(false);
     }
@@ -152,9 +156,10 @@ export default function ChatUI({ initialSession }: ChatUIProps) {
 
       {/* Input Area */}
       <div className="p-4 bg-white border-t border-gray-200">
-        {demoWarning && (
-          <div className="mb-2 bg-yellow-50 text-yellow-800 text-xs px-3 py-2 rounded border border-yellow-200 text-center animate-bounce">
-            {demoWarning}
+        {errorMsg && (
+          <div className="mb-2 bg-red-50 text-red-800 text-xs px-3 py-2 rounded border border-red-200 flex justify-between items-center">
+             <span>{errorMsg}</span>
+             <button onClick={() => setErrorMsg('')} className="text-red-500 hover:text-red-700 font-bold ml-2">×</button>
           </div>
         )}
         <form onSubmit={handleSubmit} className="flex gap-4">
