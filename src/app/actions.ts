@@ -8,36 +8,33 @@ import { Message, SessionData } from '../lib/types';
 
 // Helper para obtener Google AI de forma segura (Server Side)
 function getAI() {
-  // Acceso directo para garantizar que Next.js/Vercel inyecte el valor
-  const apiKey = process.env.API_KEY || process.env.NEXT_PUBLIC_API_KEY;
+  // Intentamos todas las variantes posibles de variables de entorno
+  const apiKey = 
+    process.env.API_KEY || 
+    process.env.NEXT_PUBLIC_API_KEY ||
+    // @ts-ignore: Acceso directo por si el bundler no reemplaza process.env
+    (typeof process !== 'undefined' && process.env ? process.env['API_KEY'] : undefined);
   
-  if (!apiKey) {
-    console.error("FALTA API KEY: Asegúrate de tener 'API_KEY' en tus variables de entorno.");
-    throw new Error("Configuración de IA incompleta: API_KEY no encontrada.");
-  }
-  return new GoogleGenAI({ apiKey });
+  // En lugar de lanzar error aquí, usamos un dummy si no existe.
+  // Esto permite instanciar el cliente y que el error real ("Invalid Key") venga de la llamada a la API.
+  // Es útil para debugging en entornos donde las env vars son inestables.
+  return new GoogleGenAI({ apiKey: apiKey || 'dummy-key-for-debugging' });
 }
 
 // Helper para obtener Supabase con permisos de administración
-// Ahora acepta una configuración manual opcional para casos donde las env vars fallan
 function getSupabase(manualConfig?: { url: string, key: string }) {
-  // 1. Si hay config manual válida recibida del cliente, usarla.
-  // Esto permite que el Server Action conecte a la misma DB que el cliente en modo manual.
   if (manualConfig?.url && manualConfig?.key) {
     return createClient(manualConfig.url, manualConfig.key);
   }
 
-  // 2. Fallback: Variables de entorno del servidor
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   
-  // Si tenemos la llave maestra (Service Role), la usamos para saltarnos RLS
   if (serviceKey && url && !serviceKey.includes('placeholder')) {
     return createClient(url, serviceKey);
   }
   
-  // Fallback final: Cliente estándar o placeholder
   return createClient(
     url || 'https://placeholder.supabase.co',
     anonKey || 'placeholder-key'
@@ -88,8 +85,12 @@ async function runPedroAgent(companyInfo: string, iteration: number): Promise<st
     });
 
     return response.text || "No encontré información relevante en esta búsqueda.";
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error en Agente Pedro:", error);
+    // Si la key es dummy, el error será 400. Devolvemos un mensaje claro.
+    if (error.message?.includes('400') || error.message?.includes('API key')) {
+      return "Error: API KEY de Gemini inválida o no encontrada.";
+    }
     return "Error técnico al consultar fuentes externas.";
   }
 }

@@ -40,12 +40,12 @@ export default function Page() {
       setLoading(true);
       setErrorMessage('');
 
-      // 0. PRE-CHECK: Si la URL es placeholder, abortar inmediatamente para no ensuciar la consola.
-      // @ts-ignore - Accedemos a la propiedad interna supabaseUrl si existe
+      // 0. PRE-CHECK: Si la URL es placeholder, abortar silenciosamente.
+      // @ts-ignore
       const clientUrl = (client as any).supabaseUrl || '';
       if (clientUrl.includes('placeholder.supabase.co') || clientUrl.includes('placeholder')) {
-         console.log("Modo Demo: Variables de entorno no detectadas.");
-         throw new Error("Variables de entorno no configuradas.");
+         // Lanzamos error controlado para ir a catch sin loguear basura
+         throw new Error("ENV_MISSING"); 
       }
 
       // 1. Verificar variables básicas y Conexión
@@ -57,21 +57,15 @@ export default function Page() {
         const { data: anonData, error: anonError } = await client.auth.signInAnonymously();
         
         if (anonError) {
-          console.warn("Auth Anónimo falló:", anonError.message);
-          // Si falla auth (ej. desactivado en dashboard), probamos conectividad básica a la BD
-          // Intentamos leer la tabla sessions (incluso si está vacía o falla RLS, un error 4xx es mejor que Network Error)
+          // Si falla auth, probamos conectividad básica a la BD para diferenciar error de red vs error de auth
           const { error: dbCheckError } = await client.from('sessions').select('count').limit(1);
           
           if (dbCheckError && dbCheckError.message && dbCheckError.message.includes('Failed to fetch')) {
-             throw new Error(`Error de Red: No se puede conectar a Supabase. Verifica la URL.`);
+             throw new Error("NETWORK_ERROR");
           }
           
-          // Si llegamos aquí, la conexión "existe" pero falló la autenticación. 
-          // Generamos un ID temporal localmente si Auth está deshabilitado pero la DB responde.
-          // NOTA: Esto solo funcionará si las políticas RLS permiten acceso público (no recomendado para prod).
           if (!anonData?.user) {
-             // Si no hay usuario y falló el login, no podemos seguir de forma segura.
-             throw new Error(`Fallo Autenticación: ${anonError.message}. Activa "Enable Anonymous Sign-ins" en Supabase Auth Settings.`);
+             throw new Error("AUTH_ERROR");
           }
         }
         userId = anonData.user?.id;
@@ -92,7 +86,7 @@ export default function Page() {
           .single();
 
         if (dbError) {
-          throw new Error(`Error BD: ${dbError.message} (Código: ${dbError.code})`);
+          throw new Error(`DB_ERROR: ${dbError.message}`);
         } else {
           setActiveSupabase(client);
           setSessionData(newSession as SessionData);
@@ -101,14 +95,27 @@ export default function Page() {
         }
       }
     } catch (error: any) {
-      console.error("Modo Demo activado por error:", error.message);
+      // Manejo de errores "limpio"
+      const msg = error.message || '';
       
-      // Mensajes amigables
-      let friendlyMsg = error.message;
-      if (friendlyMsg.includes('Variables de entorno')) friendlyMsg = "Faltan variables de entorno. Configura la conexión manual.";
-      if (friendlyMsg.includes('Failed to fetch')) friendlyMsg = "Error de conexión: Revisa la URL (https://...) o si tu proyecto Supabase está pausado.";
+      // Solo logueamos si es un error inesperado, no si es configuración faltante
+      if (msg !== 'ENV_MISSING' && msg !== 'NETWORK_ERROR') {
+        console.warn("Conexión automática no disponible:", msg);
+      }
 
-      setErrorMessage(friendlyMsg);
+      // Mensajes amigables para la UI
+      let uiMsg = '';
+      if (msg === 'NETWORK_ERROR' || msg.includes('Failed to fetch')) {
+        uiMsg = "No se pudo conectar a Supabase. Verifica tu URL.";
+      } else if (msg === 'ENV_MISSING') {
+        uiMsg = ""; // No mostrar error, solo pedir config
+      } else if (msg === 'AUTH_ERROR') {
+        uiMsg = "Fallo de autenticación. Verifica tus credenciales.";
+      } else {
+        uiMsg = msg;
+      }
+
+      setErrorMessage(uiMsg);
       setIsDemo(true);
       setSessionData(DEMO_SESSION);
       setShowManualConfig(true); 
@@ -132,7 +139,6 @@ export default function Page() {
     
     const cleanKey = manualKey.trim();
 
-    // Actualizar estados para que ChatUI reciba la config limpia
     setManualUrl(cleanUrl);
     setManualKey(cleanKey);
 
@@ -152,13 +158,13 @@ export default function Page() {
   return (
     <main className="min-h-screen bg-gray-100 p-4 font-sans text-gray-900 relative">
       
-      {/* Panel de Configuración Manual (Se muestra si hay error) */}
+      {/* Panel de Configuración Manual (Se muestra si hay error o falta config) */}
       {showManualConfig && (
         <div className="absolute top-0 left-0 w-full h-full bg-gray-900/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
-            <h2 className="text-2xl font-bold text-gray-800 mb-2">Configuración Manual</h2>
+            <h2 className="text-2xl font-bold text-gray-800 mb-2">Configuración</h2>
             <p className="text-gray-600 text-sm mb-4">
-              Ingresa tus credenciales de Supabase.
+              Ingresa tus credenciales de Supabase para iniciar.
             </p>
             
             {errorMessage && (
@@ -225,7 +231,6 @@ export default function Page() {
         <ChatUI 
           initialSession={sessionData} 
           customSupabase={activeSupabase}
-          // Pasar configuración manual si existe (para server actions)
           manualConfig={
             manualUrl && manualKey ? { url: manualUrl, key: manualKey } : undefined
           }
