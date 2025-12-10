@@ -1,30 +1,42 @@
-'use server';
-
 import { GoogleGenAI } from "@google/genai";
 import { createClient } from '@supabase/supabase-js';
-import { Message, SessionData, WorkflowState } from '../lib/types';
+import { Message, SessionData } from '../lib/types';
+import { supabase as clientSupabase } from '../lib/supabase/supabase-client';
 
-// Lazy initialization helpers to prevent client-side crashes
+// Safe env getter
+const getEnv = (key: string) => {
+  if (typeof process !== 'undefined' && process.env && process.env[key]) return process.env[key];
+  // @ts-ignore
+  if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env[key]) return import.meta.env[key];
+  return undefined;
+};
+
+// Lazy initialization helpers
 function getAI() {
-  const apiKey = process.env.API_KEY;
+  const apiKey = getEnv('API_KEY');
   if (!apiKey) {
-    throw new Error("API_KEY is not set in environment variables");
+    console.error("API_KEY missing. Ensure it is set in Vercel or .env");
+    throw new Error("API_KEY is not set");
   }
   return new GoogleGenAI({ apiKey });
 }
 
-function getSupabaseAdmin() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+function getSupabase() {
+  // If we are on the server and have the secret key, use it (bypasses RLS)
+  const serviceKey = getEnv('SUPABASE_SERVICE_ROLE_KEY');
+  const url = getEnv('NEXT_PUBLIC_SUPABASE_URL');
   
-  if (!url || !key) {
-    throw new Error("Supabase URL or Service Role Key is missing");
+  if (serviceKey && url) {
+    return createClient(url, serviceKey);
   }
-  return createClient(url, key);
+  
+  // Fallback to client-side auth (requires RLS policy for UPDATE)
+  console.warn("Using Client Supabase (ensure RLS allows updates)");
+  return clientSupabase;
 }
 
 async function updateSession(id: string, updates: Partial<SessionData>) {
-  const supabase = getSupabaseAdmin();
+  const supabase = getSupabase();
   const { error } = await supabase
     .from('sessions')
     .update(updates)
@@ -107,7 +119,7 @@ async function runJuanAgent(companyInfo: string, researchResults: string[]): Pro
 
 // -- Main Orchestrator --
 export async function processUserMessage(sessionId: string, userId: string, userContent: string) {
-  const supabase = getSupabaseAdmin();
+  const supabase = getSupabase();
 
   // 1. Fetch current session state
   const { data: session, error } = await supabase
