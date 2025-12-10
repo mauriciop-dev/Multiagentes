@@ -1,11 +1,11 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { supabase, supabaseUrl } from '../lib/supabase/supabase-client';
+import { supabase, supabaseUrl, supabaseKey } from '../lib/supabase/supabase-client';
 import ChatUI from '../components/ChatUI';
 import { SessionData } from '../lib/types';
 
-// Mock Data for UI Preview
+// Mock Data for UI Preview (Solo se usa si fallan las keys)
 const DEMO_SESSION: SessionData = {
   id: 'demo-session',
   user_id: 'demo-user',
@@ -33,9 +33,9 @@ export default function Page() {
       try {
         console.log("Iniciando conexión a Supabase...");
         
-        // 1. Verificar URL
-        if (!supabaseUrl || supabaseUrl.includes('placeholder')) {
-          throw new Error("La variable NEXT_PUBLIC_SUPABASE_URL no está definida o es incorrecta.");
+        // 1. Verificación Estricta de Variables
+        if (!supabaseUrl || !supabaseKey || supabaseUrl.includes('placeholder')) {
+          throw new Error("Variables de entorno no detectadas. Ve a Vercel -> Deployments -> Redeploy para que los cambios surtan efecto.");
         }
 
         // 2. Autenticación Anónima
@@ -48,7 +48,7 @@ export default function Page() {
           
           if (anonError) {
             console.error("Error Auth Anónimo:", anonError);
-            throw new Error(`Error de Autenticación: ${anonError.message}. Asegúrate de habilitar 'Anonymous Sign-ins' en Supabase.`);
+            throw new Error(`Error de Autenticación: ${anonError.message}. ¿Habilitaste 'Anonymous Sign-ins' en Supabase Auth?`);
           }
           userId = anonData.user?.id;
         }
@@ -71,7 +71,13 @@ export default function Page() {
 
         if (dbError) {
           console.error("Error DB Insert:", dbError);
-          throw new Error(`Error de Base de Datos: ${dbError.message} (Código: ${dbError.code}). ¿Creaste la tabla 'sessions'?`);
+          if (dbError.code === '42P01') {
+             throw new Error("La tabla 'sessions' no existe. Corre el script SQL en Supabase.");
+          }
+          if (dbError.code === '42501') {
+             throw new Error("Permiso denegado (RLS). Corre el script SQL de Políticas en Supabase.");
+          }
+          throw new Error(`Error BD: ${dbError.message}`);
         }
         
         setSessionData(newSession as SessionData);
@@ -103,13 +109,16 @@ export default function Page() {
       {isDemo && (
         <div className="absolute top-0 left-0 w-full bg-red-100 text-red-900 text-sm py-3 px-4 border-b border-red-200 z-50 shadow-sm">
           <div className="max-w-4xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-2">
-            <div>
-              <strong>Modo Demo Activo:</strong> {errorMessage}
+            <div className="flex items-center gap-2">
+              <span className="text-xl">⚠️</span>
+              <div>
+                <strong>Modo Demo (Sin Conexión):</strong> {errorMessage}
+              </div>
             </div>
           </div>
         </div>
       )}
-      <div className={isDemo ? "mt-12" : ""}>
+      <div className={isDemo ? "mt-16" : ""}>
         {sessionData && <ChatUI initialSession={sessionData} />}
       </div>
     </main>

@@ -3,31 +3,36 @@ import { createClient } from '@supabase/supabase-js';
 import { Message, SessionData } from '../lib/types';
 import { supabase as clientSupabase } from '../lib/supabase/supabase-client';
 
-// Helper: Get Google AI Instance
+// -- Configuración de Entorno --
+
+// Helper para obtener Google AI de forma segura
 function getAI() {
-  // Access directly from process.env for Server Environment
-  const apiKey = process.env.API_KEY; 
+  // Intentamos leer API_KEY (Server) o NEXT_PUBLIC_API_KEY (Client fallback)
+  const apiKey = process.env.API_KEY || process.env.NEXT_PUBLIC_API_KEY;
+  
   if (!apiKey) {
-    throw new Error("API_KEY no encontrada en variables de entorno.");
+    console.error("FALTA API KEY: Asegúrate de tener 'API_KEY' en tus variables de entorno.");
+    throw new Error("Configuración de IA incompleta: API_KEY no encontrada.");
   }
   return new GoogleGenAI({ apiKey });
 }
 
-// Helper: Get Supabase Admin Instance (Bypass RLS)
+// Helper para obtener Supabase con permisos de administración (si es posible)
 function getSupabase() {
+  // Solo funciona en el servidor (Node.js)
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   
-  // If we have the Service Role Key (Server Side), use it to bypass permissions
-  if (serviceKey && url) {
+  // Si tenemos la llave maestra, la usamos para saltarnos las reglas RLS (útil para el agente)
+  if (serviceKey && url && !serviceKey.includes('placeholder')) {
     return createClient(url, serviceKey);
   }
   
-  // Fallback to client instance (Subject to RLS)
+  // Si estamos en el cliente o falta la llave maestra, usamos el cliente normal
   return clientSupabase;
 }
 
-// ... Rest of the functions remain the same logic, just ensuring imports are clean ...
+// -- Lógica de Base de Datos --
 
 async function updateSession(id: string, updates: Partial<SessionData>) {
   const supabase = getSupabase();
@@ -36,7 +41,7 @@ async function updateSession(id: string, updates: Partial<SessionData>) {
     .update(updates)
     .eq('id', id);
   
-  if (error) console.error('Error updating session:', error);
+  if (error) console.error('Error actualizando sesión:', error);
 }
 
 async function addMessage(id: string, currentHistory: Message[], newMessage: Message) {
@@ -45,19 +50,20 @@ async function addMessage(id: string, currentHistory: Message[], newMessage: Mes
   return updatedHistory;
 }
 
-// -- Agent: Pedro (AI Engineer) --
+// -- Agente 1: Pedro (Ingeniero IA) --
 async function runPedroAgent(companyInfo: string, iteration: number): Promise<string> {
   const ai = getAI();
   const modelId = 'gemini-2.5-flash';
   
   const prompt = `
-    Act as Pedro, a specialized AI Engineer consultant.
-    Your goal is to research technical opportunities for the following company/topic: "${companyInfo}".
+    Eres Pedro, un consultor técnico experto en IA e Ingeniería.
+    Objetivo: Investigar oportunidades técnicas para: "${companyInfo}".
+    Iteración de investigación: ${iteration}.
     
-    This is iteration number ${iteration} of your research.
-    Focus on finding specific recent news, technologies, or digital transformation opportunities.
-    
-    Keep your response concise (under 150 words), technical, and objective.
+    Instrucciones:
+    1. Busca tecnologías recientes, patentes o casos de uso digitales relevantes.
+    2. Sé técnico, preciso y analítico.
+    3. Máximo 150 palabras.
   `;
 
   try {
@@ -65,37 +71,35 @@ async function runPedroAgent(companyInfo: string, iteration: number): Promise<st
       model: modelId,
       contents: prompt,
       config: {
-        tools: [{ googleSearch: {} }],
+        tools: [{ googleSearch: {} }], // Grounding con Google Search
       },
     });
 
-    return response.text || "No se encontraron datos específicos en esta iteración.";
+    return response.text || "No encontré información relevante en esta búsqueda.";
   } catch (error) {
-    console.error("Pedro Error:", error);
-    return "Tuve un problema técnico al conectar con la base de conocimientos.";
+    console.error("Error en Agente Pedro:", error);
+    return "Error técnico al consultar fuentes externas.";
   }
 }
 
-// -- Agent: Juan (Project Manager) --
+// -- Agente 2: Juan (Project Manager) --
 async function runJuanAgent(companyInfo: string, researchResults: string[]): Promise<string> {
   const ai = getAI();
   const modelId = 'gemini-2.5-flash';
   
   const prompt = `
-    Act as Juan, a Senior Project Manager and Digital Strategist.
+    Eres Juan, un Project Manager Senior y Estratega Digital.
     
-    Context:
-    Client Interest: "${companyInfo}"
+    Contexto del Cliente: "${companyInfo}"
     
-    Technical Findings (from Pedro, our Engineer):
-    ${researchResults.map((r, i) => `Finding ${i + 1}: ${r}`).join('\n')}
+    Hallazgos Técnicos (de Pedro):
+    ${researchResults.map((r, i) => `- ${r}`).join('\n')}
     
-    Task:
-    Write a final Executive Report for the client.
-    1. Summarize the key technical findings in business terms.
-    2. Propose 3 concrete AI-driven solutions.
-    3. Use a professional, empathetic, and strategic tone.
-    4. Format with Markdown (headers, bullet points).
+    Tu Tarea:
+    Generar un Informe Ejecutivo Final en Markdown.
+    1. Resumen Ejecutivo: Traduce los hallazgos técnicos a valor de negocio.
+    2. Propuesta de Valor: 3 Soluciones de IA concretas y rentables.
+    3. Tono: Profesional, empático, orientado a resultados.
   `;
 
   try {
@@ -104,61 +108,62 @@ async function runJuanAgent(companyInfo: string, researchResults: string[]): Pro
       contents: prompt,
     });
 
-    return response.text || "No pude generar el reporte final.";
+    return response.text || "No se pudo generar el informe final.";
   } catch (error) {
-    console.error("Juan Error:", error);
-    return "Error al generar el reporte ejecutivo.";
+    console.error("Error en Agente Juan:", error);
+    return "Error al redactar el informe final.";
   }
 }
 
-// -- Main Orchestrator --
+// -- Orquestador Principal (Simulación LangGraph) --
 export async function processUserMessage(sessionId: string, userId: string, userContent: string) {
   const supabase = getSupabase();
 
-  // 1. Fetch current session state
+  // 1. Validar sesión
   const { data: session, error } = await supabase
     .from('sessions')
     .select('*')
     .eq('id', sessionId)
     .single();
 
-  if (error || !session) throw new Error("Session not found");
+  if (error || !session) throw new Error("No se encontró la sesión activa.");
 
   let currentSession = session as SessionData;
 
-  // 2. Add User Message
+  // 2. Guardar mensaje del usuario
   const userMsg: Message = { role: 'user', content: userContent, timestamp: Date.now() };
   let history = await addMessage(sessionId, currentSession.chat_history, userMsg);
 
-  // 3. State Transition: WAITING -> START_RESEARCH
+  // 3. Transición: WAITING -> START_RESEARCH
   await updateSession(sessionId, { 
     company_info: userContent, 
     current_state: 'START_RESEARCH' 
   });
   
-  // Message from Pedro acknowledging receipt
+  // Respuesta inicial de Pedro
   await addMessage(sessionId, history, {
     role: 'agent',
     name: 'Pedro',
-    content: `Entendido. Iniciando análisis técnico sobre "${userContent}". Dame un momento para investigar fuentes recientes.`,
+    content: `Entendido. Comienzo el análisis técnico para "${userContent}".`,
     timestamp: Date.now()
   });
 
-  // LOOP Logic
+  // Bucle de Investigación (Pedro)
   let researchResults = currentSession.research_results || [];
   let counter = 0;
-  const MAX_RESEARCH_LOOPS = 2; 
+  const MAX_RESEARCH_LOOPS = 2; // Cantidad de búsquedas
 
   while (counter < MAX_RESEARCH_LOOPS) {
-    await updateSession(sessionId, { current_state: 'START_RESEARCH', research_counter: counter + 1 });
+    await updateSession(sessionId, { research_counter: counter + 1 });
     
     const finding = await runPedroAgent(userContent, counter + 1);
     researchResults.push(finding);
     
+    // Pedro reporta hallazgo
     history = await addMessage(sessionId, history, {
       role: 'agent',
       name: 'Pedro',
-      content: `[Hallazgo Técnico #${counter + 1}]: ${finding}`,
+      content: `[Hallazgo #${counter + 1}]: ${finding}`,
       timestamp: Date.now()
     });
 
@@ -166,25 +171,28 @@ export async function processUserMessage(sessionId: string, userId: string, user
     counter++;
   }
 
-  // --- TRANSITION TO JUAN ---
+  // 4. Transición: RESEARCH -> START_REPORT (Juan)
   await updateSession(sessionId, { current_state: 'START_REPORT' });
 
+  // Juan toma el relevo
   await addMessage(sessionId, history, {
     role: 'agent',
     name: 'Juan',
-    content: "Gracias Pedro. Analizaré estos datos para preparar la propuesta estratégica para el cliente.",
+    content: "Gracias Pedro. Excelente trabajo técnico. Procedo a estructurar la estrategia de negocio para el cliente.",
     timestamp: Date.now()
   });
 
   const finalReport = await runJuanAgent(userContent, researchResults);
 
+  // Juan entrega el reporte
   history = await addMessage(sessionId, history, {
     role: 'agent',
     name: 'Juan',
-    content: "Aquí tienes el Informe Ejecutivo Final basado en nuestro análisis:",
+    content: "Aquí tienes el Informe Ejecutivo Final.",
     timestamp: Date.now()
   });
 
+  // 5. Finalizar
   await updateSession(sessionId, { 
     report_final: finalReport, 
     current_state: 'FINISHED',
