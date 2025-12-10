@@ -4,19 +4,28 @@ import { GoogleGenAI } from "@google/genai";
 import { createClient } from '@supabase/supabase-js';
 import { Message, SessionData, WorkflowState } from '../lib/types';
 
-// Initialize Gemini
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Lazy initialization helpers to prevent client-side crashes
+function getAI() {
+  const apiKey = process.env.API_KEY;
+  if (!apiKey) {
+    throw new Error("API_KEY is not set in environment variables");
+  }
+  return new GoogleGenAI({ apiKey });
+}
 
-// Initialize Supabase Admin (Service Role needed for server-side updates without session context if needed, 
-// or standard client if we trust the RLS policies for the passed ID. 
-// Ideally use Service Role for backend logic to bypass RLS for bot updates.)
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+function getSupabaseAdmin() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  
+  if (!url || !key) {
+    throw new Error("Supabase URL or Service Role Key is missing");
+  }
+  return createClient(url, key);
+}
 
 async function updateSession(id: string, updates: Partial<SessionData>) {
-  const { error } = await supabaseAdmin
+  const supabase = getSupabaseAdmin();
+  const { error } = await supabase
     .from('sessions')
     .update(updates)
     .eq('id', id);
@@ -31,8 +40,8 @@ async function addMessage(id: string, currentHistory: Message[], newMessage: Mes
 }
 
 // -- Agent: Pedro (AI Engineer) --
-// Focus: Google Search, Technical analysis
 async function runPedroAgent(companyInfo: string, iteration: number): Promise<string> {
+  const ai = getAI();
   const modelId = 'gemini-2.5-flash';
   
   const prompt = `
@@ -50,7 +59,7 @@ async function runPedroAgent(companyInfo: string, iteration: number): Promise<st
       model: modelId,
       contents: prompt,
       config: {
-        tools: [{ googleSearch: {} }], // Grounding with Google Search
+        tools: [{ googleSearch: {} }],
       },
     });
 
@@ -62,8 +71,8 @@ async function runPedroAgent(companyInfo: string, iteration: number): Promise<st
 }
 
 // -- Agent: Juan (Project Manager) --
-// Focus: Synthesis, Business Value, Final Report
 async function runJuanAgent(companyInfo: string, researchResults: string[]): Promise<string> {
+  const ai = getAI();
   const modelId = 'gemini-2.5-flash';
   
   const prompt = `
@@ -96,10 +105,12 @@ async function runJuanAgent(companyInfo: string, researchResults: string[]): Pro
   }
 }
 
-// -- Main Orchestrator (LangGraph Simulation) --
+// -- Main Orchestrator --
 export async function processUserMessage(sessionId: string, userId: string, userContent: string) {
+  const supabase = getSupabaseAdmin();
+
   // 1. Fetch current session state
-  const { data: session, error } = await supabaseAdmin
+  const { data: session, error } = await supabase
     .from('sessions')
     .select('*')
     .eq('id', sessionId)
@@ -119,15 +130,6 @@ export async function processUserMessage(sessionId: string, userId: string, user
     current_state: 'START_RESEARCH' 
   });
   
-  // -- Trigger Agent Loop --
-  // Note: In a real serverless env like Vercel, long-running processes might timeout. 
-  // We will execute the logic sequentially here, updating DB at each step so UI updates in realtime.
-  
-  // LOOP Logic: Research (Simulating 3 steps or until satisfied)
-  let researchResults = currentSession.research_results || [];
-  let counter = 0;
-  const MAX_RESEARCH_LOOPS = 2; // Keep it short for demo speed
-
   // Message from Pedro acknowledging receipt
   await addMessage(sessionId, history, {
     role: 'agent',
@@ -136,16 +138,17 @@ export async function processUserMessage(sessionId: string, userId: string, user
     timestamp: Date.now()
   });
 
-  // --- NODE: PEDRO & DECISION ---
+  // LOOP Logic
+  let researchResults = currentSession.research_results || [];
+  let counter = 0;
+  const MAX_RESEARCH_LOOPS = 2; 
+
   while (counter < MAX_RESEARCH_LOOPS) {
-    // Update State
     await updateSession(sessionId, { current_state: 'START_RESEARCH', research_counter: counter + 1 });
     
-    // Pedro Works
     const finding = await runPedroAgent(userContent, counter + 1);
     researchResults.push(finding);
     
-    // Pedro Reports back to Chat
     history = await addMessage(sessionId, history, {
       role: 'agent',
       name: 'Pedro',
@@ -153,7 +156,6 @@ export async function processUserMessage(sessionId: string, userId: string, user
       timestamp: Date.now()
     });
 
-    // Update DB with results
     await updateSession(sessionId, { research_results: researchResults });
     counter++;
   }
@@ -161,7 +163,6 @@ export async function processUserMessage(sessionId: string, userId: string, user
   // --- TRANSITION TO JUAN ---
   await updateSession(sessionId, { current_state: 'START_REPORT' });
 
-  // Message from Juan taking over
   await addMessage(sessionId, history, {
     role: 'agent',
     name: 'Juan',
@@ -169,10 +170,8 @@ export async function processUserMessage(sessionId: string, userId: string, user
     timestamp: Date.now()
   });
 
-  // --- NODE: JUAN ---
   const finalReport = await runJuanAgent(userContent, researchResults);
 
-  // Juan delivers report
   history = await addMessage(sessionId, history, {
     role: 'agent',
     name: 'Juan',
@@ -180,10 +179,9 @@ export async function processUserMessage(sessionId: string, userId: string, user
     timestamp: Date.now()
   });
 
-  // Save Report and Finish
   await updateSession(sessionId, { 
     report_final: finalReport, 
     current_state: 'FINISHED',
-    chat_history: history // Ensure history is perfectly synced
+    chat_history: history 
   });
 }

@@ -26,6 +26,7 @@ export default function Page() {
   const [sessionData, setSessionData] = useState<SessionData | null>(null);
   const [loading, setLoading] = useState(true);
   const [isDemo, setIsDemo] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
 
   useEffect(() => {
     const initSession = async () => {
@@ -68,8 +69,9 @@ export default function Page() {
         
         setSessionData(newSession as SessionData);
 
-      } catch (error) {
+      } catch (error: any) {
         console.warn("Backend unavailable, loading Demo Mode for UI preview.", error);
+        setErrorMessage(error.message || "Unknown error");
         setSessionData(DEMO_SESSION);
         setIsDemo(true);
       } finally {
@@ -92,8 +94,9 @@ export default function Page() {
   if (!sessionData) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-red-500 bg-white p-6 rounded-xl shadow-lg border border-red-100">
-          Error crítico al cargar la aplicación.
+        <div className="text-red-500 bg-white p-6 rounded-xl shadow-lg border border-red-100 max-w-md">
+          <h3 className="font-bold text-lg mb-2">Error crítico</h3>
+          <p>{errorMessage || "No se pudo cargar la aplicación."}</p>
         </div>
       </div>
     );
@@ -103,7 +106,7 @@ export default function Page() {
     <main className="min-h-screen bg-gray-100 p-4 font-sans text-gray-900 relative">
       {isDemo && (
         <div className="absolute top-0 left-0 w-full bg-yellow-100 text-yellow-800 text-xs py-1 px-4 text-center border-b border-yellow-200 z-50">
-          <strong>Modo Vista Previa:</strong> Sin conexión a Backend. La IA y la base de datos están simuladas.
+          <strong>Modo Vista Previa:</strong> {errorMessage ? `(${errorMessage})` : ""} Sin conexión a Backend. La IA y la base de datos están simuladas.
         </div>
       )}
       <div className={isDemo ? "mt-6" : ""}>
