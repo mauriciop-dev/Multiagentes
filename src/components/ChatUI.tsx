@@ -1,14 +1,19 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { supabase } from '../lib/supabase/supabase-client';
+import { supabase as defaultSupabase } from '../lib/supabase/supabase-client';
 import { processUserMessage } from '../app/actions';
 import { Message, SessionData, WorkflowState } from '../lib/types';
 import ReactMarkdown from 'react-markdown';
+import { SupabaseClient } from '@supabase/supabase-js';
 
 interface ChatUIProps {
   initialSession: SessionData;
+  customSupabase?: SupabaseClient;
 }
 
-export default function ChatUI({ initialSession }: ChatUIProps) {
+export default function ChatUI({ initialSession, customSupabase }: ChatUIProps) {
+  // Usamos el cliente inyectado o el por defecto
+  const supabase = customSupabase || defaultSupabase;
+  
   const [session, setSession] = useState<SessionData>(initialSession);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -18,8 +23,9 @@ export default function ChatUI({ initialSession }: ChatUIProps) {
 
   // Subscribe to real-time changes
   useEffect(() => {
-    if (isDemo) return; // Skip subscription in demo mode
+    if (isDemo) return; 
 
+    console.log(`Suscribiéndose a cambios en sesión: ${session.id}`);
     const channel = supabase
       .channel(`session:${session.id}`)
       .on(
@@ -31,15 +37,21 @@ export default function ChatUI({ initialSession }: ChatUIProps) {
           filter: `id=eq.${session.id}`,
         },
         (payload) => {
+          console.log("Cambio recibido:", payload);
           setSession(payload.new as SessionData);
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log("Estado de suscripción:", status);
+        if (status === 'CHANNEL_ERROR') {
+          console.error("Error en canal realtime. Verifica configuración de Supabase.");
+        }
+      });
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [session.id, isDemo]);
+  }, [session.id, isDemo, supabase]);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -52,7 +64,7 @@ export default function ChatUI({ initialSession }: ChatUIProps) {
     setErrorMsg('');
 
     if (isDemo) {
-      setErrorMsg("Funcionalidad deshabilitada en Modo Demo. Configura las variables en Vercel para continuar.");
+      setErrorMsg("Funcionalidad deshabilitada en Modo Demo. Configura las variables en Vercel o en el panel manual.");
       return;
     }
 
@@ -61,13 +73,14 @@ export default function ChatUI({ initialSession }: ChatUIProps) {
     setLoading(true);
 
     try {
-      // Optimistic update (optional, but waiting for DB update is safer for consistency here)
+      // Nota: processUserMessage es una Server Action. 
+      // Si las variables de entorno del SERVIDOR (Vercel) están mal, esto fallará.
       await processUserMessage(session.id, session.user_id, userText);
     } catch (error: any) {
       console.error(error);
       const msg = error.message || "Error desconocido";
       if (msg.includes("API_KEY")) {
-        setErrorMsg("Error de Configuración: Falta la API_KEY de Gemini en Vercel.");
+        setErrorMsg("Error Server-Side: Falta API_KEY de Gemini.");
       } else {
         setErrorMsg(`Error: ${msg}`);
       }
