@@ -5,20 +5,8 @@ import { supabase } from '../lib/supabase/supabase-client';
 import ChatUI from '../components/ChatUI';
 import { SessionData } from '../lib/types';
 
-// Safe env getter for the frontend component
-const getSafeEnv = (key: string) => {
-  try {
-    // @ts-ignore
-    if (typeof process !== 'undefined' && process.env) return process.env[key];
-    // @ts-ignore
-    if (typeof import.meta !== 'undefined' && import.meta.env) return import.meta.env[key];
-  } catch (e) {
-    return undefined;
-  }
-  return undefined;
-};
-
 // Mock Data for UI Preview
+// Changed current_state to WAITING_FOR_INFO so the input is enabled by default in demo mode.
 const DEMO_SESSION: SessionData = {
   id: 'demo-session',
   user_id: 'demo-user',
@@ -31,7 +19,7 @@ const DEMO_SESSION: SessionData = {
   company_info: 'Constructora Futuro S.A.',
   research_results: ['BIM implementation opportunities', 'IoT sensors for construction'],
   report_final: '',
-  current_state: 'START_REPORT', // Simulating Juan is writing
+  current_state: 'WAITING_FOR_INFO', 
   research_counter: 1
 };
 
@@ -44,8 +32,11 @@ export default function Page() {
   useEffect(() => {
     const initSession = async () => {
       try {
-        // Safe check for env vars using the helper
-        const sbUrl = getSafeEnv('NEXT_PUBLIC_SUPABASE_URL');
+        // Explicitly check env vars so bundler handles them correctly
+        const sbUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 
+                      // @ts-ignore
+                      (typeof import.meta !== 'undefined' && import.meta.env?.NEXT_PUBLIC_SUPABASE_URL);
+
         const hasEnvVars = sbUrl && !sbUrl.includes('placeholder');
 
         if (!hasEnvVars) {
