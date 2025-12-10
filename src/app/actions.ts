@@ -15,6 +15,13 @@ interface ActionConfig {
 
 // NUEVO: Función para rescatar la configuración del servidor con FALLBACKS
 export async function getServerConfig() {
+  // Debug: Ver qué claves existen realmente en el entorno del servidor
+  const envKeys = Object.keys(process.env).filter(key => 
+    key.includes('SUPABASE') || key.includes('NEXT_PUBLIC') || key.includes('API_KEY')
+  );
+  
+  console.log("[Server Diagnostic] Claves de entorno visibles:", envKeys);
+
   // Intentar leer variantes con y sin prefijo NEXT_PUBLIC
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_KEY;
@@ -23,7 +30,7 @@ export async function getServerConfig() {
   // Verificación de diagnóstico: ¿Existe la Service Key? (Esto nos dice si las variables de servidor están cargando)
   const hasServiceKey = !!process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-  console.log("Server Config Diagnostic:", {
+  console.log("[Server Diagnostic] Estado:", {
     urlFound: !!url,
     anonKeyFound: !!anonKey,
     serviceKeyFound: hasServiceKey,

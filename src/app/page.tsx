@@ -40,7 +40,6 @@ export default function Page() {
   const [manualGeminiKey, setManualGeminiKey] = useState(''); 
 
   // Esta bandera nos dice si debemos forzar el envío de credenciales al servidor
-  // (porque el servidor dijo que no las tenía)
   const [forceClientConfig, setForceClientConfig] = useState(false);
 
   const connectWithClient = async (client: SupabaseClient, credentials?: {url: string, key: string, gemini?: string}, isRetry = false) => {
@@ -117,9 +116,6 @@ export default function Page() {
       try {
         console.log("⚡ Fase 1: Diagnóstico de Servidor...");
         const serverConfig = await getServerConfig();
-
-        // 1. Recolectar credenciales potenciales
-        // Prioridad: Servidor > Cliente (Build Env) > LocalStorage
         
         const serverUrl = serverConfig.supabaseUrl;
         const serverKey = serverConfig.supabaseAnonKey;
@@ -136,16 +132,17 @@ export default function Page() {
         let source = '';
 
         if (serverUrl && serverKey) {
+          console.log("✅ Servidor configurado correctamente.");
           finalUrl = serverUrl;
           finalKey = serverKey;
           source = 'server';
         } else if (clientEnvUrl && clientEnvKey) {
-          console.log("⚠️ Servidor sin credenciales, usando Client Env Vars.");
+          console.log("ℹ️ Usando variables de entorno del Cliente (Fallback).");
           finalUrl = clientEnvUrl;
           finalKey = clientEnvKey;
           source = 'client-env';
-          // IMPORTANTE: Si las sacamos del cliente, debemos forzar su envío al servidor
-          // porque el servidor ya admitió que no las tiene.
+          setManualUrl(clientEnvUrl);
+          setManualKey(clientEnvKey);
           setForceClientConfig(true);
         } else if (storedUrl && storedKey) {
           console.log("⚠️ Usando credenciales guardadas en LocalStorage.");
@@ -159,9 +156,6 @@ export default function Page() {
 
         if (finalUrl && finalKey) {
           const client = createManualClient(finalUrl, finalKey);
-          // Si el servidor ya tiene Gemini (serverConfig.hasGeminiKey), no necesitamos pedirlo
-          const geminiNeeded = !serverConfig.hasGeminiKey && !storedGemini; 
-          
           await connectWithClient(client, { 
             url: finalUrl, 
             key: finalKey, 
@@ -173,7 +167,6 @@ export default function Page() {
 
       } catch (err) {
         console.warn("Fallo en inicialización automática:", err);
-        // Fallback final: Modo Demo
         setIsDemo(true);
         setSessionData(DEMO_SESSION);
         setShowManualConfig(true);
@@ -194,7 +187,6 @@ export default function Page() {
     const cleanKey = manualKey.trim();
 
     const newClient = createManualClient(cleanUrl, cleanKey);
-    // Al hacerlo manual, siempre forzamos el envío de config
     setForceClientConfig(true); 
     
     connectWithClient(newClient, { 
@@ -214,10 +206,6 @@ export default function Page() {
     );
   }
 
-  // Lógica para decidir qué config pasar al ChatUI
-  // Si forceClientConfig es true, pasamos explícitamente url/key.
-  // Si no, pasamos undefined (asumiendo que el server las tiene).
-  // Gemini key se pasa si es manual.
   const chatConfig = forceClientConfig ? {
     supabase: { url: manualUrl, key: manualKey },
     geminiApiKey: manualGeminiKey || undefined
@@ -232,9 +220,13 @@ export default function Page() {
         <div className="absolute top-0 left-0 w-full h-full bg-gray-900/90 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-8 max-h-[90vh] overflow-y-auto">
             <h2 className="text-2xl font-bold text-gray-800 mb-2">Conexión Requerida</h2>
-            <p className="text-gray-600 mb-6 text-sm">
-              El sistema necesita conectarse a tu base de datos Supabase para guardar el historial y coordinar a los agentes.
+            <p className="text-gray-600 mb-4 text-sm">
+              El servidor no detectó las variables. Esto ocurre a menudo tras el primer despliegue.
             </p>
+            
+            <div className="mb-6 bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-xs text-yellow-800">
+              <strong>Tip Rápido:</strong> Si ya configuraste las variables en Vercel, intenta hacer un <strong>Redeploy</strong> de tu proyecto. Las variables nuevas a menudo requieren reinicar el servidor.
+            </div>
 
             {errorMessage && (
               <div className="mb-6 bg-red-50 border-l-4 border-red-500 p-4 text-sm text-red-700">
@@ -273,9 +265,6 @@ export default function Page() {
                   placeholder="AIzaSy..."
                   className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-cyan-500 outline-none transition-all"
                 />
-                <p className="text-xs text-gray-400 mt-1">
-                  El servidor {manualGeminiKey ? 'usará esta clave.' : 'intentará usar su clave interna.'}
-                </p>
               </div>
 
               <button 
