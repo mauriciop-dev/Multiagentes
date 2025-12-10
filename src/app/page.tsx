@@ -40,18 +40,39 @@ export default function Page() {
       setLoading(true);
       setErrorMessage('');
 
-      // 1. Verificar variables básicas
-      // Nota: No podemos leer la URL del cliente directamente de forma segura, 
-      // así que probamos la conexión con auth.getUser() o signInAnon.
-      
+      // 0. PRE-CHECK: Si la URL es placeholder, abortar inmediatamente para no ensuciar la consola.
+      // @ts-ignore - Accedemos a la propiedad interna supabaseUrl si existe
+      const clientUrl = (client as any).supabaseUrl || '';
+      if (clientUrl.includes('placeholder.supabase.co') || clientUrl.includes('placeholder')) {
+         console.log("Modo Demo: Variables de entorno no detectadas.");
+         throw new Error("Variables de entorno no configuradas.");
+      }
+
+      // 1. Verificar variables básicas y Conexión
       const { data: authData, error: userError } = await client.auth.getUser();
       let userId = authData?.user?.id;
 
       if (!userId) {
+        // Intentar anon sign in
         const { data: anonData, error: anonError } = await client.auth.signInAnonymously();
+        
         if (anonError) {
-          console.error("Auth Fail:", anonError);
-          throw new Error(`Fallo Auth: ${anonError.message}`);
+          console.warn("Auth Anónimo falló:", anonError.message);
+          // Si falla auth (ej. desactivado en dashboard), probamos conectividad básica a la BD
+          // Intentamos leer la tabla sessions (incluso si está vacía o falla RLS, un error 4xx es mejor que Network Error)
+          const { error: dbCheckError } = await client.from('sessions').select('count').limit(1);
+          
+          if (dbCheckError && dbCheckError.message && dbCheckError.message.includes('Failed to fetch')) {
+             throw new Error(`Error de Red: No se puede conectar a Supabase. Verifica la URL.`);
+          }
+          
+          // Si llegamos aquí, la conexión "existe" pero falló la autenticación. 
+          // Generamos un ID temporal localmente si Auth está deshabilitado pero la DB responde.
+          // NOTA: Esto solo funcionará si las políticas RLS permiten acceso público (no recomendado para prod).
+          if (!anonData?.user) {
+             // Si no hay usuario y falló el login, no podemos seguir de forma segura.
+             throw new Error(`Fallo Autenticación: ${anonError.message}. Activa "Enable Anonymous Sign-ins" en Supabase Auth Settings.`);
+          }
         }
         userId = anonData.user?.id;
       }
@@ -80,11 +101,17 @@ export default function Page() {
         }
       }
     } catch (error: any) {
-      console.error("Conexión Fallida:", error);
-      setErrorMessage(error.message);
+      console.error("Modo Demo activado por error:", error.message);
+      
+      // Mensajes amigables
+      let friendlyMsg = error.message;
+      if (friendlyMsg.includes('Variables de entorno')) friendlyMsg = "Faltan variables de entorno. Configura la conexión manual.";
+      if (friendlyMsg.includes('Failed to fetch')) friendlyMsg = "Error de conexión: Revisa la URL (https://...) o si tu proyecto Supabase está pausado.";
+
+      setErrorMessage(friendlyMsg);
       setIsDemo(true);
       setSessionData(DEMO_SESSION);
-      setShowManualConfig(true); // Mostrar form manual si falla
+      setShowManualConfig(true); 
     } finally {
       setLoading(false);
     }
@@ -97,7 +124,19 @@ export default function Page() {
   const handleManualSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!manualUrl || !manualKey) return;
-    const manualClient = createManualClient(manualUrl, manualKey);
+    
+    // Sanear inputs
+    let cleanUrl = manualUrl.trim();
+    if (!cleanUrl.startsWith('http')) cleanUrl = `https://${cleanUrl}`;
+    cleanUrl = cleanUrl.replace(/\/$/, ''); // Quitar slash final
+    
+    const cleanKey = manualKey.trim();
+
+    // Actualizar estados para que ChatUI reciba la config limpia
+    setManualUrl(cleanUrl);
+    setManualKey(cleanKey);
+
+    const manualClient = createManualClient(cleanUrl, cleanKey);
     attemptConnection(manualClient);
   };
 
@@ -119,11 +158,11 @@ export default function Page() {
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
             <h2 className="text-2xl font-bold text-gray-800 mb-2">Configuración Manual</h2>
             <p className="text-gray-600 text-sm mb-4">
-              No se detectaron las variables de entorno o la conexión falló. Ingresa tus credenciales de Supabase manualmente.
+              Ingresa tus credenciales de Supabase.
             </p>
             
             {errorMessage && (
-              <div className="bg-red-50 border-l-4 border-red-500 p-3 mb-4 text-xs text-red-700 font-mono">
+              <div className="bg-red-50 border-l-4 border-red-500 p-3 mb-4 text-xs text-red-700 font-mono break-words">
                 {errorMessage}
               </div>
             )}

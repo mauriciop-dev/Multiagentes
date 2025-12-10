@@ -14,5 +14,13 @@ export const supabase = createClient(
 
 // Helper para crear un cliente manualmente (para el modo de depuración en UI)
 export const createManualClient = (url: string, key: string) => {
-  return createClient(url.trim(), key.trim());
+  let cleanUrl = url.trim();
+  // Asegurar protocolo https
+  if (!cleanUrl.startsWith('http')) {
+    cleanUrl = `https://${cleanUrl}`;
+  }
+  // Quitar slash final si existe
+  cleanUrl = cleanUrl.replace(/\/$/, '');
+  
+  return createClient(cleanUrl, key.trim());
 };
