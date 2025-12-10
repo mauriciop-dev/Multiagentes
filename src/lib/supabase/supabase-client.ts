@@ -1,33 +1,22 @@
 import { createClient } from '@supabase/supabase-js';
 
-// Access environment variables explicitly so Next.js/Vite bundlers can replace them statically.
-// Dynamic access (process.env[key]) fails in many bundlers for browser builds.
-
-const getUrl = () => {
-  if (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_SUPABASE_URL) {
-    return process.env.NEXT_PUBLIC_SUPABASE_URL;
+// Helper function to safely get environment variables in various environments (Vite, Next.js, Standard)
+const getEnvVar = (key: string): string | undefined => {
+  // Check process.env (Next.js / Node)
+  if (typeof process !== 'undefined' && process.env && process.env[key]) {
+    return process.env[key];
   }
+  // Check import.meta.env (Vite)
   // @ts-ignore
-  if (typeof import.meta !== 'undefined' && import.meta.env?.NEXT_PUBLIC_SUPABASE_URL) {
+  if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env[key]) {
     // @ts-ignore
-    return import.meta.env.NEXT_PUBLIC_SUPABASE_URL;
+    return import.meta.env[key];
   }
-  return '';
+  return undefined;
 };
 
-const getAnonKey = () => {
-  if (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
-    return process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  }
-  // @ts-ignore
-  if (typeof import.meta !== 'undefined' && import.meta.env?.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
-    // @ts-ignore
-    return import.meta.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  }
-  return '';
-};
-
-const supabaseUrl = getUrl() || 'https://placeholder.supabase.co';
-const supabaseKey = getAnonKey() || 'placeholder-key';
+// Export these so other components can check them without re-implementing logic
+export const supabaseUrl = getEnvVar('NEXT_PUBLIC_SUPABASE_URL') || 'https://placeholder.supabase.co';
+export const supabaseKey = getEnvVar('NEXT_PUBLIC_SUPABASE_ANON_KEY') || 'placeholder-key';
 
 export const supabase = createClient(supabaseUrl, supabaseKey);

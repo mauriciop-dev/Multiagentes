@@ -1,12 +1,11 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { supabase } from '../lib/supabase/supabase-client';
+import { supabase, supabaseUrl } from '../lib/supabase/supabase-client';
 import ChatUI from '../components/ChatUI';
 import { SessionData } from '../lib/types';
 
 // Mock Data for UI Preview
-// Changed current_state to WAITING_FOR_INFO so the input is enabled by default in demo mode.
 const DEMO_SESSION: SessionData = {
   id: 'demo-session',
   user_id: 'demo-user',
@@ -32,15 +31,11 @@ export default function Page() {
   useEffect(() => {
     const initSession = async () => {
       try {
-        // Explicitly check env vars so bundler handles them correctly
-        const sbUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 
-                      // @ts-ignore
-                      (typeof import.meta !== 'undefined' && import.meta.env?.NEXT_PUBLIC_SUPABASE_URL);
-
-        const hasEnvVars = sbUrl && !sbUrl.includes('placeholder');
+        // Use the safely exported URL from the client file
+        const hasEnvVars = supabaseUrl && !supabaseUrl.includes('placeholder');
 
         if (!hasEnvVars) {
-          throw new Error("Missing Supabase Keys");
+          throw new Error("Supabase URL no encontrada. Verifica las variables de entorno.");
         }
 
         // 1. Anonymous Auth
@@ -54,7 +49,7 @@ export default function Page() {
           userId = anonData.user?.id;
         }
 
-        if (!userId) throw new Error("Could not authenticate");
+        if (!userId) throw new Error("No se pudo autenticar con Supabase.");
 
         // 2. Check for existing active session or create new
         const { data: newSession, error: dbError } = await supabase
@@ -74,8 +69,8 @@ export default function Page() {
         setSessionData(newSession as SessionData);
 
       } catch (error: any) {
-        console.warn("Backend unavailable, loading Demo Mode for UI preview.", error);
-        setErrorMessage(error.message || "Unknown error");
+        console.warn("Entrando en Modo Demo debido a:", error);
+        setErrorMessage(error.message || "Error desconocido de conexión");
         setSessionData(DEMO_SESSION);
         setIsDemo(true);
       } finally {
@@ -109,11 +104,12 @@ export default function Page() {
   return (
     <main className="min-h-screen bg-gray-100 p-4 font-sans text-gray-900 relative">
       {isDemo && (
-        <div className="absolute top-0 left-0 w-full bg-yellow-100 text-yellow-800 text-xs py-1 px-4 text-center border-b border-yellow-200 z-50">
-          <strong>Modo Vista Previa:</strong> {errorMessage ? `(${errorMessage})` : ""} Sin conexión a Backend. La IA y la base de datos están simuladas.
+        <div className="absolute top-0 left-0 w-full bg-yellow-100 text-yellow-800 text-xs py-2 px-4 text-center border-b border-yellow-200 z-50">
+          <strong>Modo Vista Previa:</strong> ({errorMessage}) <br/>
+          <span className="opacity-80">La base de datos y la IA están simuladas. Configura tus Keys en Vercel/Env para activar el sistema real.</span>
         </div>
       )}
-      <div className={isDemo ? "mt-6" : ""}>
+      <div className={isDemo ? "mt-10" : ""}>
         <ChatUI initialSession={sessionData} />
       </div>
     </main>

@@ -12,6 +12,7 @@ export default function ChatUI({ initialSession }: ChatUIProps) {
   const [session, setSession] = useState<SessionData>(initialSession);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [demoWarning, setDemoWarning] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
   const isDemo = session.id === 'demo-session';
 
@@ -50,7 +51,9 @@ export default function ChatUI({ initialSession }: ChatUIProps) {
     if (!input.trim() || loading) return;
 
     if (isDemo) {
-      alert("Estás en modo Vista Previa. Para funcionalidad real (IA + Base de Datos), necesitas configurar las variables de entorno de Supabase y Google Gemini.");
+      // Replaced blocking alert() with state-based warning to fix INP issues
+      setDemoWarning("Funcionalidad deshabilitada en Modo Demo. Conecta Supabase y Gemini para continuar.");
+      setTimeout(() => setDemoWarning(''), 5000);
       return;
     }
 
@@ -149,6 +152,11 @@ export default function ChatUI({ initialSession }: ChatUIProps) {
 
       {/* Input Area */}
       <div className="p-4 bg-white border-t border-gray-200">
+        {demoWarning && (
+          <div className="mb-2 bg-yellow-50 text-yellow-800 text-xs px-3 py-2 rounded border border-yellow-200 text-center animate-bounce">
+            {demoWarning}
+          </div>
+        )}
         <form onSubmit={handleSubmit} className="flex gap-4">
           <input
             type="text"
