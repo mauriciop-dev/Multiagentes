@@ -13,14 +13,28 @@ interface ActionConfig {
   key?: string;
 }
 
-// NUEVO: Función para rescatar la configuración del servidor
-// Esto soluciona el problema de que el navegador no vea las variables NEXT_PUBLIC
+// NUEVO: Función para rescatar la configuración del servidor con FALLBACKS
 export async function getServerConfig() {
+  // Intentar leer variantes con y sin prefijo NEXT_PUBLIC
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_KEY;
+  const geminiKey = process.env.API_KEY || process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
+  
+  // Verificación de diagnóstico: ¿Existe la Service Key? (Esto nos dice si las variables de servidor están cargando)
+  const hasServiceKey = !!process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  console.log("Server Config Diagnostic:", {
+    urlFound: !!url,
+    anonKeyFound: !!anonKey,
+    serviceKeyFound: hasServiceKey,
+    geminiFound: !!geminiKey
+  });
+
   return {
-    supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL || null,
-    supabaseAnonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || null,
-    hasGeminiKey: !!process.env.API_KEY, // Solo devolvemos true/false por seguridad
-    isConfigured: !!(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY)
+    supabaseUrl: url || null,
+    supabaseAnonKey: anonKey || null,
+    hasGeminiKey: !!geminiKey,
+    isConfigured: !!(url && anonKey)
   };
 }
 
@@ -54,7 +68,7 @@ function formatGenAIError(error: any): string {
 
 function getAI(manualKey?: string) {
   // Priorizar clave manual si existe, sino usar variable de entorno
-  const apiKey = manualKey || process.env.API_KEY;
+  const apiKey = manualKey || process.env.API_KEY || process.env.GOOGLE_API_KEY;
   
   if (!apiKey) {
     console.error("CRITICAL ERROR: 'API_KEY' environment variable is missing.");
@@ -70,20 +84,16 @@ function getSupabase(config?: { url: string, key: string }) {
     return createClient(config.url, config.key);
   }
 
-  // 2. Si no, usar variables de entorno del SERVIDOR (Service Role)
-  // Nota: Service Role permite escritura sin restricciones RLS si es necesario, 
-  // pero aquí lo usamos para asegurar que el server tenga acceso siempre.
+  // 2. Si no, usar variables de entorno del SERVIDOR (Service Role preferred for actions)
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  
-  // 3. Fallback a Anon Key si no hay Service Role (aunque Service Role es recomendado para server actions)
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_KEY;
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
   
   if (url && (serviceKey || anonKey) && !url.includes('placeholder')) {
     return createClient(url, serviceKey || anonKey!);
   }
   
-  // 4. Último recurso: placeholder (esto fallará las llamadas pero permite compilar)
+  // 4. Último recurso: placeholder
   return createClient(
     url || 'https://placeholder.supabase.co',
     anonKey || 'placeholder-key'
@@ -103,7 +113,6 @@ async function updateSession(id: string, updates: Partial<SessionData>, sbConfig
 }
 
 async function addMessage(id: string, currentHistory: Message[] | null | undefined, newMessage: Message, sbConfig?: { url: string, key: string }) {
-  // Defensive coding: ensure history is an array
   const safeHistory = Array.isArray(currentHistory) ? currentHistory : [];
   const updatedHistory = [...safeHistory, newMessage];
   

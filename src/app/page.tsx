@@ -25,33 +25,29 @@ const DEMO_SESSION: SessionData = {
 };
 
 export default function Page() {
-  // Estado de la sesión y UI
   const [sessionData, setSessionData] = useState<SessionData | null>(null);
   const [loading, setLoading] = useState(true);
   const [isDemo, setIsDemo] = useState(false);
-  
-  // Estado de credenciales y conexión
   const [activeSupabase, setActiveSupabase] = useState<SupabaseClient | null>(null);
+  
+  // UI Estado
   const [showManualConfig, setShowManualConfig] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   
-  // Inputs del formulario manual
+  // Inputs Manuales
   const [manualUrl, setManualUrl] = useState('');
   const [manualKey, setManualKey] = useState('');
   const [manualGeminiKey, setManualGeminiKey] = useState(''); 
 
-  // Función para intentar conectar con un cliente dado
   const connectWithClient = async (client: SupabaseClient, credentials?: {url: string, key: string, gemini?: string}) => {
     try {
       setErrorMessage('');
       setLoading(true);
 
-      // 1. Verificar Autenticación
       const { data: authData, error: authError } = await client.auth.getUser();
       let userId = authData?.user?.id;
 
       if (!userId) {
-        // Intentar anónimo
         const { data: anonData, error: anonError } = await client.auth.signInAnonymously();
         if (anonError) throw new Error(`AUTH_FAIL: ${anonError.message}`);
         userId = anonData.user?.id;
@@ -59,7 +55,6 @@ export default function Page() {
 
       if (!userId) throw new Error("No se pudo obtener User ID.");
 
-      // 2. Verificar Base de Datos (Crear sesión)
       const { data: newSession, error: dbError } = await client
         .from('sessions')
         .insert({
@@ -74,14 +69,12 @@ export default function Page() {
 
       if (dbError) throw new Error(`DB_FAIL: ${dbError.message}`);
 
-      // ÉXITO
       setActiveSupabase(client);
       setSessionData(newSession as SessionData);
       setIsDemo(false);
       setShowManualConfig(false);
       setLoading(false);
 
-      // Guardar en localStorage si fue manual
       if (credentials) {
         localStorage.setItem('saved_supabase_url', credentials.url);
         localStorage.setItem('saved_supabase_key', credentials.key);
@@ -98,8 +91,6 @@ export default function Page() {
 
       setErrorMessage(uiMsg);
       setLoading(false);
-      
-      // Si falla, mostramos demo pero abrimos config
       setIsDemo(true);
       setSessionData(DEMO_SESSION);
       setShowManualConfig(true);
@@ -111,23 +102,19 @@ export default function Page() {
       setLoading(true);
       
       try {
-        console.log("⚡ Solicitando credenciales al servidor (Server Action)...");
+        console.log("⚡ Verificando variables de entorno en el servidor...");
+        // Esta función ahora busca SUPABASE_URL (sin NEXT_PUBLIC) como fallback
         const serverConfig = await getServerConfig();
 
         if (serverConfig.isConfigured && serverConfig.supabaseUrl && serverConfig.supabaseAnonKey) {
-          console.log("✅ Credenciales recibidas del servidor.");
-          // Creamos el cliente dinámicamente con lo que nos dio el servidor
-          // Esto soluciona el problema de process.env vacío en el navegador
+          console.log("✅ Credenciales encontradas en el servidor.");
           const serverClient = createManualClient(serverConfig.supabaseUrl, serverConfig.supabaseAnonKey);
-          
           await connectWithClient(serverClient);
         } else {
-          console.warn("⚠️ Servidor reporta credenciales faltantes.");
+          console.warn("⚠️ Servidor reporta variables incompletas.");
           throw new Error("SERVER_MISSING_CONFIG");
         }
       } catch (err) {
-        console.log("⚠️ Fallo obteniendo config servidor, buscando en localStorage...");
-        
         // Fallback: LocalStorage
         const savedUrl = localStorage.getItem('saved_supabase_url');
         const savedKey = localStorage.getItem('saved_supabase_key');
@@ -165,11 +152,6 @@ export default function Page() {
     });
   };
 
-  const handleReset = () => {
-    localStorage.clear();
-    window.location.reload();
-  };
-
   if (loading && !sessionData) {
     return (
       <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
@@ -183,13 +165,12 @@ export default function Page() {
   return (
     <main className="min-h-screen bg-gray-100 p-4 font-sans text-gray-900 relative">
       
-      {/* Modal de Configuración (Solo si falla todo lo demás) */}
       {showManualConfig && (
         <div className="absolute top-0 left-0 w-full h-full bg-gray-900/90 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-8">
-            <h2 className="text-2xl font-bold text-gray-800 mb-2">Configuración de Conexión</h2>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-8 max-h-[90vh] overflow-y-auto">
+            <h2 className="text-2xl font-bold text-gray-800 mb-2">Configuración Necesaria</h2>
             <p className="text-gray-600 mb-6 text-sm">
-              No se pudo establecer conexión automática con el servidor. Ingresa tus credenciales de Supabase.
+              El sistema no detectó las variables de entorno automáticamente. Esto es común si acabas de desplegar.
             </p>
 
             {errorMessage && (
@@ -198,9 +179,14 @@ export default function Page() {
               </div>
             )}
 
+            <div className="mb-6 bg-blue-50 border border-blue-100 rounded-lg p-3 text-xs text-blue-800">
+              <strong>Tip de Producción:</strong> Si ya configuraste las variables en Vercel, intenta hacer un 
+              <strong> Redeploy</strong> asegurándote de no usar la caché de compilación, o simplemente ingrésalas aquí una vez (se guardarán en tu navegador).
+            </div>
+
             <form onSubmit={handleManualSubmit} className="space-y-5">
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">Project URL</label>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Supabase Project URL</label>
                 <input 
                   type="text" 
                   value={manualUrl}
@@ -210,7 +196,7 @@ export default function Page() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">Anon Public Key</label>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Supabase Anon Key</label>
                 <input 
                   type="password" 
                   value={manualKey}
@@ -229,7 +215,6 @@ export default function Page() {
                   placeholder="AIzaSy..."
                   className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-cyan-500 outline-none transition-all"
                 />
-                <p className="text-xs text-gray-500 mt-1">Solo necesaria si no está configurada en Vercel.</p>
               </div>
 
               <button 
@@ -243,7 +228,6 @@ export default function Page() {
         </div>
       )}
 
-      {/* Botón flotante para re-configurar */}
       {(isDemo || !loading) && (
         <button 
           onClick={() => setShowManualConfig(true)}
@@ -254,7 +238,6 @@ export default function Page() {
         </button>
       )}
 
-      {/* Interfaz de Chat */}
       {sessionData && (
         <ChatUI 
           initialSession={sessionData} 
