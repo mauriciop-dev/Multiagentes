@@ -3,17 +3,21 @@ import { createClient } from '@supabase/supabase-js';
 import { Message, SessionData } from '../lib/types';
 import { supabase as clientSupabase } from '../lib/supabase/supabase-client';
 
-// Safe env getter
-const getEnv = (key: string) => {
+// Helper to get env vars safely on server
+function getEnv(key: string) {
+  // Explicit check for known keys to ensure bundlers pick them up if they are doing static analysis
+  if (key === 'API_KEY') return process.env.API_KEY;
+  if (key === 'SUPABASE_SERVICE_ROLE_KEY') return process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (key === 'NEXT_PUBLIC_SUPABASE_URL') return process.env.NEXT_PUBLIC_SUPABASE_URL;
+  
+  // Fallback for generic Node environment
   if (typeof process !== 'undefined' && process.env && process.env[key]) return process.env[key];
-  // @ts-ignore
-  if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env[key]) return import.meta.env[key];
   return undefined;
-};
+}
 
 // Lazy initialization helpers
 function getAI() {
-  const apiKey = getEnv('API_KEY');
+  const apiKey = process.env.API_KEY; 
   if (!apiKey) {
     console.error("API_KEY missing. Ensure it is set in Vercel or .env");
     throw new Error("API_KEY is not set");
@@ -23,8 +27,8 @@ function getAI() {
 
 function getSupabase() {
   // If we are on the server and have the secret key, use it (bypasses RLS)
-  const serviceKey = getEnv('SUPABASE_SERVICE_ROLE_KEY');
-  const url = getEnv('NEXT_PUBLIC_SUPABASE_URL');
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   
   if (serviceKey && url) {
     return createClient(url, serviceKey);
