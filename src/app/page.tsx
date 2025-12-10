@@ -5,6 +5,19 @@ import { supabase } from '../lib/supabase/supabase-client';
 import ChatUI from '../components/ChatUI';
 import { SessionData } from '../lib/types';
 
+// Safe env getter for the frontend component
+const getSafeEnv = (key: string) => {
+  try {
+    // @ts-ignore
+    if (typeof process !== 'undefined' && process.env) return process.env[key];
+    // @ts-ignore
+    if (typeof import.meta !== 'undefined' && import.meta.env) return import.meta.env[key];
+  } catch (e) {
+    return undefined;
+  }
+  return undefined;
+};
+
 // Mock Data for UI Preview
 const DEMO_SESSION: SessionData = {
   id: 'demo-session',
@@ -31,9 +44,9 @@ export default function Page() {
   useEffect(() => {
     const initSession = async () => {
       try {
-        // Check if we have valid env vars
-        const hasEnvVars = process.env.NEXT_PUBLIC_SUPABASE_URL && 
-                           !process.env.NEXT_PUBLIC_SUPABASE_URL.includes('placeholder');
+        // Safe check for env vars using the helper
+        const sbUrl = getSafeEnv('NEXT_PUBLIC_SUPABASE_URL');
+        const hasEnvVars = sbUrl && !sbUrl.includes('placeholder');
 
         if (!hasEnvVars) {
           throw new Error("Missing Supabase Keys");
@@ -52,7 +65,7 @@ export default function Page() {
 
         if (!userId) throw new Error("Could not authenticate");
 
-        // 2. Check for existing active session
+        // 2. Check for existing active session or create new
         const { data: newSession, error: dbError } = await supabase
           .from('sessions')
           .insert({
