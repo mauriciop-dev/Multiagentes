@@ -13,12 +13,41 @@ interface ActionConfig {
   key?: string;
 }
 
+// -- Helpers de Errores --
+
+// Formatea errores complejos de la API de Google en mensajes Markdown legibles para el usuario
+function formatGenAIError(error: any): string {
+  const msg = error.message || String(error);
+
+  // Caso específico: API no habilitada (Error 403 SERVICE_DISABLED)
+  // El mensaje suele ser: "Generative Language API has not been used in project X before or it is disabled."
+  if (msg.includes("SERVICE_DISABLED") || (msg.includes("Generative Language API") && msg.includes("disabled"))) {
+    // Intentamos extraer la URL exacta que manda Google en el error
+    const urlRegex = /https:\/\/console\.developers\.google\.com\/apis\/api\/generativelanguage\.googleapis\.com\/overview\?project=\d+/;
+    const match = msg.match(urlRegex);
+    const activationUrl = match ? match[0] : 'https://console.developers.google.com/apis/api/generativelanguage.googleapis.com';
+    
+    return `🚨 **Acción Requerida: Habilitar API**\n\nTu API Key es válida, pero el servicio "Generative Language API" no está activado en tu proyecto de Google Cloud.\n\n👉 **[Haz clic aquí para activarlo](${activationUrl})**\n\n_Después de activar (botón azul "Habilitar"), espera 1 minuto e intenta nuevamente._`;
+  }
+
+  // Limpieza general de JSON dump si ocurre
+  if (msg.trim().startsWith('{')) {
+    try {
+      const parsed = JSON.parse(msg);
+      if (parsed.error && parsed.error.message) {
+        return `[Error Técnico]: ${parsed.error.message}`;
+      }
+    } catch (e) {
+      // Si falla el parseo, devolvemos el original
+    }
+  }
+
+  return `[Error del Sistema]: ${msg.substring(0, 300)}${msg.length > 300 ? '...' : ''}`;
+}
+
 // -- Configuración de Entorno --
 
-// Helper para obtener Google AI de forma segura (Server Side)
-// Ahora acepta un parámetro opcional para override manual
 function getAI(manualKey?: string) {
-  // Prioridad: 1. Manual Key (desde UI), 2. Env Var
   const apiKey = manualKey || process.env.API_KEY;
   
   if (!apiKey) {
@@ -29,7 +58,6 @@ function getAI(manualKey?: string) {
   return new GoogleGenAI({ apiKey });
 }
 
-// Helper para obtener Supabase
 function getSupabase(config?: { url: string, key: string }) {
   if (config?.url && config?.key) {
     return createClient(config.url, config.key);
@@ -88,14 +116,15 @@ async function runPedroAgent(companyInfo: string, iteration: number, apiKey?: st
       model: modelId,
       contents: prompt,
       config: {
-        tools: [{ googleSearch: {} }], // Grounding con Google Search
+        tools: [{ googleSearch: {} }], 
       },
     });
 
     return response.text || "No encontré información relevante en esta búsqueda.";
   } catch (error: any) {
     console.error("Error en Agente Pedro:", error);
-    return `[Error del Sistema]: ${error.message}`;
+    // Usamos el helper para formatear el error amigablemente
+    return formatGenAIError(error);
   }
 }
 
@@ -128,7 +157,7 @@ async function runJuanAgent(companyInfo: string, researchResults: string[], apiK
     return response.text || "No se pudo generar el informe final.";
   } catch (error: any) {
     console.error("Error en Agente Juan:", error);
-    return `[Error del Sistema]: ${error.message}`;
+    return formatGenAIError(error);
   }
 }
 
@@ -139,8 +168,6 @@ export async function processUserMessage(
   userContent: string,
   config?: ActionConfig
 ) {
-  // Extraer configuraciones de forma segura
-  // Soportamos tanto el formato nuevo { supabase: {}, geminiApiKey: '' } como el antiguo { url, key }
   const sbConfig = config?.supabase || (config?.url ? { url: config.url!, key: config.key! } : undefined);
   const geminiKey = config?.geminiApiKey;
 
