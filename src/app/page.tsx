@@ -129,8 +129,6 @@ export default function Page() {
       setErrorMessage(uiMsg);
       setIsDemo(true);
       setSessionData(DEMO_SESSION);
-      // Solo mostramos el modal manual si NO están configuradas las variables de entorno
-      // O si falló explícitamente la conexión manual
       setShowManualConfig(true); 
     } finally {
       setLoading(false);
@@ -144,13 +142,10 @@ export default function Page() {
       attemptConnection(defaultSupabase);
     } else {
       console.log("Variables de entorno no detectadas. Buscando en localStorage...");
-      // Forzar fallo inicial para que busque en localStorage o abra el modal
       const savedUrl = localStorage.getItem('saved_supabase_url');
       if (savedUrl) {
-         // Si hay algo guardado, intentamos usarlo (la lógica de fallback ya está en attemptConnection)
          attemptConnection(defaultSupabase); 
       } else {
-        // Si no hay env vars ni storage, mostramos demo y config
         setIsDemo(true);
         setSessionData(DEMO_SESSION);
         setShowManualConfig(true);
@@ -163,7 +158,6 @@ export default function Page() {
     e.preventDefault();
     if (!manualUrl || !manualKey) return;
     
-    // Sanear inputs
     let cleanUrl = manualUrl.trim();
     if (!cleanUrl.startsWith('http')) cleanUrl = `https://${cleanUrl}`;
     cleanUrl = cleanUrl.replace(/\/$/, '');
@@ -206,8 +200,30 @@ export default function Page() {
             <p className="text-gray-600 text-sm mb-4">
               {isEnvConfigured 
                 ? "Hubo un error conectando con las credenciales del servidor." 
-                : "No se detectaron variables de entorno. Por favor ingrésalas manualmente."}
+                : "No se detectaron variables de entorno pre-configuradas."}
             </p>
+            
+            {/* DEBUG PANEL: Muestra visualmente qué variables detecta Next.js */}
+            <div className="mb-6 p-3 bg-gray-50 border border-gray-200 rounded-lg text-xs font-mono">
+              <p className="font-bold text-gray-500 mb-2 uppercase tracking-wider">Diagnóstico de Variables:</p>
+              <div className="flex justify-between items-center mb-1">
+                <span>NEXT_PUBLIC_SUPABASE_URL:</span>
+                <span className={process.env.NEXT_PUBLIC_SUPABASE_URL ? "text-green-600 font-bold" : "text-red-500 font-bold"}>
+                  {process.env.NEXT_PUBLIC_SUPABASE_URL ? "✅ Detectada" : "❌ No Detectada"}
+                </span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span>NEXT_PUBLIC_SUPABASE_ANON_KEY:</span>
+                <span className={process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? "text-green-600 font-bold" : "text-red-500 font-bold"}>
+                  {process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? "✅ Detectada" : "❌ No Detectada"}
+                </span>
+              </div>
+              {!isEnvConfigured && (
+                <p className="mt-2 text-gray-400 italic">
+                  Si ya las pusiste en Vercel pero salen con ❌, necesitas hacer un <strong>Redeploy</strong>.
+                </p>
+              )}
+            </div>
             
             {errorMessage && (
               <div className="bg-red-50 border-l-4 border-red-500 p-3 mb-4 text-xs text-red-700 font-mono break-words">
@@ -217,7 +233,7 @@ export default function Page() {
 
             <form onSubmit={handleManualSubmit} className="space-y-4">
               <div className="pt-2 border-t border-gray-100">
-                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Base de Datos (Supabase)</h3>
+                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Ingreso Manual (Respaldo)</h3>
                 <div className="space-y-3">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Project URL</label>
@@ -281,7 +297,6 @@ export default function Page() {
         </button>
       )}
 
-      {/* Botón discreto para limpiar credenciales si es necesario (útil para debug o cambio de cuentas) */}
       {!isDemo && !loading && !isEnvConfigured && (
         <button 
           onClick={handleClearConfig}
