@@ -15,14 +15,10 @@ interface ActionConfig {
 
 // -- Helpers de Errores --
 
-// Formatea errores complejos de la API de Google en mensajes Markdown legibles para el usuario
 function formatGenAIError(error: any): string {
   const msg = error.message || String(error);
 
-  // Caso específico: API no habilitada (Error 403 SERVICE_DISABLED)
-  // El mensaje suele ser: "Generative Language API has not been used in project X before or it is disabled."
   if (msg.includes("SERVICE_DISABLED") || (msg.includes("Generative Language API") && msg.includes("disabled"))) {
-    // Intentamos extraer la URL exacta que manda Google en el error
     const urlRegex = /https:\/\/console\.developers\.google\.com\/apis\/api\/generativelanguage\.googleapis\.com\/overview\?project=\d+/;
     const match = msg.match(urlRegex);
     const activationUrl = match ? match[0] : 'https://console.developers.google.com/apis/api/generativelanguage.googleapis.com';
@@ -30,7 +26,6 @@ function formatGenAIError(error: any): string {
     return `🚨 **Acción Requerida: Habilitar API**\n\nTu API Key es válida, pero el servicio "Generative Language API" no está activado en tu proyecto de Google Cloud.\n\n👉 **[Haz clic aquí para activarlo](${activationUrl})**\n\n_Después de activar (botón azul "Habilitar"), espera 1 minuto e intenta nuevamente._`;
   }
 
-  // Limpieza general de JSON dump si ocurre
   if (msg.trim().startsWith('{')) {
     try {
       const parsed = JSON.parse(msg);
@@ -38,7 +33,6 @@ function formatGenAIError(error: any): string {
         return `[Error Técnico]: ${parsed.error.message}`;
       }
     } catch (e) {
-      // Si falla el parseo, devolvemos el original
     }
   }
 
@@ -89,8 +83,11 @@ async function updateSession(id: string, updates: Partial<SessionData>, sbConfig
   if (error) console.error('Error actualizando sesión:', error);
 }
 
-async function addMessage(id: string, currentHistory: Message[], newMessage: Message, sbConfig?: { url: string, key: string }) {
-  const updatedHistory = [...currentHistory, newMessage];
+async function addMessage(id: string, currentHistory: Message[] | null | undefined, newMessage: Message, sbConfig?: { url: string, key: string }) {
+  // Defensive coding: ensure history is an array
+  const safeHistory = Array.isArray(currentHistory) ? currentHistory : [];
+  const updatedHistory = [...safeHistory, newMessage];
+  
   await updateSession(id, { chat_history: updatedHistory }, sbConfig);
   return updatedHistory;
 }
@@ -123,7 +120,6 @@ async function runPedroAgent(companyInfo: string, iteration: number, apiKey?: st
     return response.text || "No encontré información relevante en esta búsqueda.";
   } catch (error: any) {
     console.error("Error en Agente Pedro:", error);
-    // Usamos el helper para formatear el error amigablemente
     return formatGenAIError(error);
   }
 }

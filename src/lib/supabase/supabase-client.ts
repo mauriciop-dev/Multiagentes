@@ -22,5 +22,11 @@ export const createManualClient = (url: string, key: string) => {
   // Quitar slash final si existe
   cleanUrl = cleanUrl.replace(/\/$/, '');
   
-  return createClient(cleanUrl, key.trim());
+  return createClient(cleanUrl, key.trim(), {
+    auth: {
+      persistSession: false, // Evita advertencias de conflicto en localStorage
+      autoRefreshToken: false,
+      detectSessionInUrl: false
+    }
+  });
 };

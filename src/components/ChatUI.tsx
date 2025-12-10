@@ -31,6 +31,10 @@ export default function ChatUI({ initialSession, customSupabase, config, manualC
   
   const isDemo = session.id === 'demo-session';
 
+  // Safely extract data to avoid "reading length of undefined" crashes
+  const history = Array.isArray(session?.chat_history) ? session.chat_history : [];
+  const finalReport = session?.report_final || '';
+
   useEffect(() => {
     setSession(initialSession);
   }, [initialSession]);
@@ -51,7 +55,15 @@ export default function ChatUI({ initialSession, customSupabase, config, manualC
         },
         (payload) => {
           console.log("Cambio recibido:", payload);
-          setSession(payload.new as SessionData);
+          if (payload.new) {
+            // Aseguramos que los datos críticos tengan un valor por defecto si vienen nulos
+            const newData = payload.new as SessionData;
+            setSession({
+              ...newData,
+              chat_history: Array.isArray(newData.chat_history) ? newData.chat_history : [],
+              report_final: newData.report_final || ''
+            });
+          }
         }
       )
       .subscribe((status) => {
@@ -67,7 +79,7 @@ export default function ChatUI({ initialSession, customSupabase, config, manualC
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [session.chat_history, session.current_state]);
+  }, [history, session.current_state]); // Depend on safe history
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -122,14 +134,14 @@ export default function ChatUI({ initialSession, customSupabase, config, manualC
 
       {/* Chat Area */}
       <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-gray-50">
-        {session.chat_history.length === 0 && (
+        {history.length === 0 && (
           <div className="text-center text-gray-400 mt-10">
             <p className="mb-2 text-lg">Bienvenido al sistema de consultoría.</p>
             <p className="text-sm">Introduce el nombre de tu empresa o el tema que deseas analizar.</p>
           </div>
         )}
 
-        {session.chat_history.map((msg, idx) => {
+        {history.map((msg, idx) => {
           const isUser = msg.role === 'user';
           const isPedro = msg.name === 'Pedro';
           const isJuan = msg.name === 'Juan';
@@ -152,7 +164,8 @@ export default function ChatUI({ initialSession, customSupabase, config, manualC
                   </div>
                 )}
                 <div className="markdown prose prose-sm max-w-none">
-                  <ReactMarkdown>{msg.content}</ReactMarkdown>
+                  {/* Protect ReactMarkdown from null content */}
+                  <ReactMarkdown>{msg.content || ''}</ReactMarkdown>
                 </div>
               </div>
             </div>
@@ -160,7 +173,7 @@ export default function ChatUI({ initialSession, customSupabase, config, manualC
         })}
 
         {/* Final Report Display */}
-        {session.report_final && (
+        {finalReport && (
           <div className="mt-8 border-t-2 border-cyan-100 pt-8">
             <div className="bg-white border border-cyan-200 rounded-xl p-8 shadow-lg relative overflow-hidden">
               <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-cyan-500 to-sky-600"></div>
@@ -168,7 +181,7 @@ export default function ChatUI({ initialSession, customSupabase, config, manualC
                 <span className="text-3xl">📄</span> Informe Ejecutivo Final
               </h2>
               <div className="prose prose-cyan max-w-none text-gray-700">
-                <ReactMarkdown>{session.report_final}</ReactMarkdown>
+                <ReactMarkdown>{finalReport}</ReactMarkdown>
               </div>
             </div>
           </div>
