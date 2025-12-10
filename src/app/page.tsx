@@ -185,7 +185,11 @@ export default function Page() {
       {sessionData && (
         <ChatUI 
           initialSession={sessionData} 
-          customSupabase={activeSupabase} 
+          customSupabase={activeSupabase}
+          // Pasar configuración manual si existe (para server actions)
+          manualConfig={
+            manualUrl && manualKey ? { url: manualUrl, key: manualKey } : undefined
+          }
         />
       )}
     </main>

@@ -19,8 +19,15 @@ function getAI() {
 }
 
 // Helper para obtener Supabase con permisos de administración
-function getSupabase() {
-  // Acceso directo a variables de entorno
+// Ahora acepta una configuración manual opcional para casos donde las env vars fallan
+function getSupabase(manualConfig?: { url: string, key: string }) {
+  // 1. Si hay config manual válida recibida del cliente, usarla.
+  // Esto permite que el Server Action conecte a la misma DB que el cliente en modo manual.
+  if (manualConfig?.url && manualConfig?.key) {
+    return createClient(manualConfig.url, manualConfig.key);
+  }
+
+  // 2. Fallback: Variables de entorno del servidor
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -30,7 +37,7 @@ function getSupabase() {
     return createClient(url, serviceKey);
   }
   
-  // Fallback: Cliente estándar con clave anónima
+  // Fallback final: Cliente estándar o placeholder
   return createClient(
     url || 'https://placeholder.supabase.co',
     anonKey || 'placeholder-key'
@@ -39,8 +46,8 @@ function getSupabase() {
 
 // -- Lógica de Base de Datos --
 
-async function updateSession(id: string, updates: Partial<SessionData>) {
-  const supabase = getSupabase();
+async function updateSession(id: string, updates: Partial<SessionData>, manualConfig?: { url: string, key: string }) {
+  const supabase = getSupabase(manualConfig);
   const { error } = await supabase
     .from('sessions')
     .update(updates)
@@ -49,9 +56,9 @@ async function updateSession(id: string, updates: Partial<SessionData>) {
   if (error) console.error('Error actualizando sesión:', error);
 }
 
-async function addMessage(id: string, currentHistory: Message[], newMessage: Message) {
+async function addMessage(id: string, currentHistory: Message[], newMessage: Message, manualConfig?: { url: string, key: string }) {
   const updatedHistory = [...currentHistory, newMessage];
-  await updateSession(id, { chat_history: updatedHistory });
+  await updateSession(id, { chat_history: updatedHistory }, manualConfig);
   return updatedHistory;
 }
 
@@ -121,8 +128,13 @@ async function runJuanAgent(companyInfo: string, researchResults: string[]): Pro
 }
 
 // -- Orquestador Principal (Simulación LangGraph) --
-export async function processUserMessage(sessionId: string, userId: string, userContent: string) {
-  const supabase = getSupabase();
+export async function processUserMessage(
+  sessionId: string, 
+  userId: string, 
+  userContent: string,
+  manualConfig?: { url: string, key: string } // Nuevo parámetro para credenciales manuales
+) {
+  const supabase = getSupabase(manualConfig);
 
   // 1. Validar sesión
   const { data: session, error } = await supabase
@@ -131,19 +143,22 @@ export async function processUserMessage(sessionId: string, userId: string, user
     .eq('id', sessionId)
     .single();
 
-  if (error || !session) throw new Error("No se encontró la sesión activa.");
+  if (error || !session) {
+    console.error("Error buscando sesión:", error);
+    throw new Error("No se encontró la sesión activa. Es posible que el servidor esté buscando en una base de datos diferente a la del navegador.");
+  }
 
   let currentSession = session as SessionData;
 
   // 2. Guardar mensaje del usuario
   const userMsg: Message = { role: 'user', content: userContent, timestamp: Date.now() };
-  let history = await addMessage(sessionId, currentSession.chat_history, userMsg);
+  let history = await addMessage(sessionId, currentSession.chat_history, userMsg, manualConfig);
 
   // 3. Transición: WAITING -> START_RESEARCH
   await updateSession(sessionId, { 
     company_info: userContent, 
     current_state: 'START_RESEARCH' 
-  });
+  }, manualConfig);
   
   // Respuesta inicial de Pedro
   await addMessage(sessionId, history, {
@@ -151,7 +166,7 @@ export async function processUserMessage(sessionId: string, userId: string, user
     name: 'Pedro',
     content: `Entendido. Comienzo el análisis técnico para "${userContent}".`,
     timestamp: Date.now()
-  });
+  }, manualConfig);
 
   // Bucle de Investigación (Pedro)
   let researchResults = currentSession.research_results || [];
@@ -159,7 +174,7 @@ export async function processUserMessage(sessionId: string, userId: string, user
   const MAX_RESEARCH_LOOPS = 2; // Cantidad de búsquedas
 
   while (counter < MAX_RESEARCH_LOOPS) {
-    await updateSession(sessionId, { research_counter: counter + 1 });
+    await updateSession(sessionId, { research_counter: counter + 1 }, manualConfig);
     
     const finding = await runPedroAgent(userContent, counter + 1);
     researchResults.push(finding);
@@ -170,14 +185,14 @@ export async function processUserMessage(sessionId: string, userId: string, user
       name: 'Pedro',
       content: `[Hallazgo #${counter + 1}]: ${finding}`,
       timestamp: Date.now()
-    });
+    }, manualConfig);
 
-    await updateSession(sessionId, { research_results: researchResults });
+    await updateSession(sessionId, { research_results: researchResults }, manualConfig);
     counter++;
   }
 
   // 4. Transición: RESEARCH -> START_REPORT (Juan)
-  await updateSession(sessionId, { current_state: 'START_REPORT' });
+  await updateSession(sessionId, { current_state: 'START_REPORT' }, manualConfig);
 
   // Juan toma el relevo
   await addMessage(sessionId, history, {
@@ -185,7 +200,7 @@ export async function processUserMessage(sessionId: string, userId: string, user
     name: 'Juan',
     content: "Gracias Pedro. Excelente trabajo técnico. Procedo a estructurar la estrategia de negocio para el cliente.",
     timestamp: Date.now()
-  });
+  }, manualConfig);
 
   const finalReport = await runJuanAgent(userContent, researchResults);
 
@@ -195,12 +210,12 @@ export async function processUserMessage(sessionId: string, userId: string, user
     name: 'Juan',
     content: "Aquí tienes el Informe Ejecutivo Final.",
     timestamp: Date.now()
-  });
+  }, manualConfig);
 
   // 5. Finalizar
   await updateSession(sessionId, { 
     report_final: finalReport, 
     current_state: 'FINISHED',
     chat_history: history 
-  });
+  }, manualConfig);
 }

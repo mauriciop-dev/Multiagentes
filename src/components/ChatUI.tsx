@@ -8,9 +8,10 @@ import { SupabaseClient } from '@supabase/supabase-js';
 interface ChatUIProps {
   initialSession: SessionData;
   customSupabase?: SupabaseClient;
+  manualConfig?: { url: string, key: string }; // Configuración manual opcional
 }
 
-export default function ChatUI({ initialSession, customSupabase }: ChatUIProps) {
+export default function ChatUI({ initialSession, customSupabase, manualConfig }: ChatUIProps) {
   // Usamos el cliente inyectado o el por defecto
   const supabase = customSupabase || defaultSupabase;
   
@@ -24,7 +25,6 @@ export default function ChatUI({ initialSession, customSupabase }: ChatUIProps) 
   const isDemo = session.id === 'demo-session';
 
   // FIX: Sincronizar el estado local cuando cambia la prop initialSession.
-  // Esto es crucial cuando se pasa del Modo Demo a una sesión real tras la conexión manual.
   useEffect(() => {
     setSession(initialSession);
   }, [initialSession]);
@@ -81,9 +81,8 @@ export default function ChatUI({ initialSession, customSupabase }: ChatUIProps) 
     setLoading(true);
 
     try {
-      // Nota: processUserMessage es una Server Action. 
-      // Si las variables de entorno del SERVIDOR (Vercel) están mal, esto fallará.
-      await processUserMessage(session.id, session.user_id, userText);
+      // FIX: Pasar manualConfig al Server Action para asegurar que use la misma DB que el cliente
+      await processUserMessage(session.id, session.user_id, userText, manualConfig);
     } catch (error: any) {
       console.error(error);
       const msg = error.message || "Error desconocido";
