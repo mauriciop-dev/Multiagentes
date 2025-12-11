@@ -6,7 +6,7 @@ import { Message, SessionData } from '../lib/types';
 
 interface ActionConfig {
   supabase?: { url: string; key: string };
-  geminiApiKey?: string;
+  // geminiApiKey removed to enforce environment variable usage
   /** @deprecated backward compatibility */
   url?: string;
   /** @deprecated backward compatibility */
@@ -73,9 +73,9 @@ function formatGenAIError(error: any): string {
 
 // -- Configuración de Entorno --
 
-function getAI(manualKey?: string) {
-  // Priorizar clave manual si existe, sino usar variable de entorno
-  const apiKey = manualKey || process.env.API_KEY || process.env.GOOGLE_API_KEY;
+function getAI() {
+  // Guideline: The API key **must** be obtained **exclusively** from the environment variable `process.env.API_KEY`.
+  const apiKey = process.env.API_KEY;
   
   if (!apiKey) {
     console.error("CRITICAL ERROR: 'API_KEY' environment variable is missing.");
@@ -128,9 +128,9 @@ async function addMessage(id: string, currentHistory: Message[] | null | undefin
 }
 
 // -- Agente 1: Pedro (Ingeniero IA) --
-async function runPedroAgent(companyInfo: string, iteration: number, apiKey?: string): Promise<string> {
+async function runPedroAgent(companyInfo: string, iteration: number): Promise<string> {
   try {
-    const ai = getAI(apiKey);
+    const ai = getAI();
     const modelId = 'gemini-2.5-flash';
     
     const prompt = `
@@ -152,7 +152,26 @@ async function runPedroAgent(companyInfo: string, iteration: number, apiKey?: st
       },
     });
 
-    return response.text || "No encontré información relevante en esta búsqueda.";
+    let text = response.text || "No encontré información relevante en esta búsqueda.";
+    
+    // Guideline: If Google Search is used, you MUST ALWAYS extract the URLs from groundingChunks and list them on the web app.
+    const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
+    if (chunks && chunks.length > 0) {
+      const sources = chunks
+        .map((chunk: any) => {
+          if (chunk.web?.uri && chunk.web?.title) {
+            return `[${chunk.web.title}](${chunk.web.uri})`;
+          }
+          return null;
+        })
+        .filter(Boolean);
+
+      if (sources.length > 0) {
+        text += `\n\n**Fuentes:**\n${sources.map((s: string) => `- ${s}`).join('\n')}`;
+      }
+    }
+
+    return text;
   } catch (error: any) {
     console.error("Error en Agente Pedro:", error);
     return formatGenAIError(error);
@@ -160,9 +179,9 @@ async function runPedroAgent(companyInfo: string, iteration: number, apiKey?: st
 }
 
 // -- Agente 2: Juan (Project Manager) --
-async function runJuanAgent(companyInfo: string, researchResults: string[], apiKey?: string): Promise<string> {
+async function runJuanAgent(companyInfo: string, researchResults: string[]): Promise<string> {
   try {
-    const ai = getAI(apiKey);
+    const ai = getAI();
     const modelId = 'gemini-2.5-flash';
     
     const prompt = `
@@ -200,8 +219,7 @@ export async function processUserMessage(
   config?: ActionConfig
 ) {
   const sbConfig = config?.supabase || (config?.url ? { url: config.url!, key: config.key! } : undefined);
-  const geminiKey = config?.geminiApiKey;
-
+  
   const supabase = getSupabase(sbConfig);
 
   // 1. Validar sesión
@@ -244,8 +262,8 @@ export async function processUserMessage(
   while (counter < MAX_RESEARCH_LOOPS) {
     await updateSession(sessionId, { research_counter: counter + 1 }, sbConfig);
     
-    // Pasamos geminiKey a los agentes
-    const finding = await runPedroAgent(userContent, counter + 1, geminiKey);
+    // Agentes usan process.env.API_KEY internamente
+    const finding = await runPedroAgent(userContent, counter + 1);
     researchResults.push(finding);
     
     // Pedro reporta hallazgo
@@ -271,7 +289,7 @@ export async function processUserMessage(
     timestamp: Date.now()
   }, sbConfig);
 
-  const finalReport = await runJuanAgent(userContent, researchResults, geminiKey);
+  const finalReport = await runJuanAgent(userContent, researchResults);
 
   // Juan entrega el reporte
   history = await addMessage(sessionId, history, {

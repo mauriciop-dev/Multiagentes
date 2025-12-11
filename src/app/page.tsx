@@ -67,12 +67,11 @@ export default function Page() {
   // Inputs Manuales / Credenciales Activas
   const [manualUrl, setManualUrl] = useState('');
   const [manualKey, setManualKey] = useState('');
-  const [manualGeminiKey, setManualGeminiKey] = useState(''); 
 
   // Esta bandera nos dice si debemos forzar el envío de credenciales al servidor
   const [forceClientConfig, setForceClientConfig] = useState(false);
 
-  const connectWithClient = async (client: SupabaseClient, credentials?: {url: string, key: string, gemini?: string}, isRetry = false) => {
+  const connectWithClient = async (client: SupabaseClient, credentials?: {url: string, key: string}, isRetry = false) => {
     try {
       setErrorMessage('');
       setLoading(true);
@@ -113,13 +112,11 @@ export default function Page() {
         // Actualizamos los estados que se pasarán al ChatUI
         setManualUrl(credentials.url);
         setManualKey(credentials.key);
-        if (credentials.gemini) setManualGeminiKey(credentials.gemini);
 
         // Guardar persistencia si fue manual
         if (isRetry) {
           localStorage.setItem('saved_supabase_url', credentials.url);
           localStorage.setItem('saved_supabase_key', credentials.key);
-          if (credentials.gemini) localStorage.setItem('saved_gemini_key', credentials.gemini);
         }
       }
 
@@ -156,7 +153,6 @@ export default function Page() {
 
         const storedUrl = localStorage.getItem('saved_supabase_url');
         const storedKey = localStorage.getItem('saved_supabase_key');
-        const storedGemini = localStorage.getItem('saved_gemini_key');
 
         let finalUrl = '';
         let finalKey = '';
@@ -189,8 +185,7 @@ export default function Page() {
           const client = createManualClient(finalUrl, finalKey);
           await connectWithClient(client, { 
             url: finalUrl, 
-            key: finalKey, 
-            gemini: storedGemini || '' 
+            key: finalKey 
           });
         } else {
           throw new Error("NO_CREDENTIALS_FOUND");
@@ -222,8 +217,7 @@ export default function Page() {
     
     connectWithClient(newClient, { 
       url: cleanUrl, 
-      key: cleanKey, 
-      gemini: manualGeminiKey 
+      key: cleanKey 
     }, true);
   };
 
@@ -238,11 +232,8 @@ export default function Page() {
   }
 
   const chatConfig = forceClientConfig ? {
-    supabase: { url: manualUrl, key: manualKey },
-    geminiApiKey: manualGeminiKey || undefined
-  } : {
-    geminiApiKey: manualGeminiKey || undefined
-  };
+    supabase: { url: manualUrl, key: manualKey }
+  } : undefined;
 
   return (
     <main className="min-h-screen bg-gray-100 p-4 font-sans text-gray-900 relative">
@@ -289,17 +280,6 @@ export default function Page() {
                 />
               </div>
               
-              <div className="pt-4 border-t border-gray-100 mt-4">
-                <label className="block text-sm font-semibold text-gray-700 mb-1">Gemini API Key (Opcional)</label>
-                <input 
-                  type="password" 
-                  value={manualGeminiKey}
-                  onChange={(e) => setManualGeminiKey(e.target.value)}
-                  placeholder="AIzaSy..."
-                  className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-cyan-500 outline-none transition-all"
-                />
-              </div>
-
               <button 
                 type="submit"
                 className="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-3 rounded-lg shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-0.5"

@@ -11,7 +11,6 @@ interface ChatUIProps {
   // Objeto de configuración unificado para pasar credenciales manuales al backend
   config?: {
     supabase?: { url: string; key: string };
-    geminiApiKey?: string;
   };
   /** @deprecated usar config */
   manualConfig?: { url: string; key: string }; 
@@ -96,13 +95,13 @@ export default function ChatUI({ initialSession, customSupabase, config, manualC
     setLoading(true);
 
     try {
-      // Pasamos el config completo al servidor (incluyendo Gemini API Key si existe)
+      // Pasamos el config completo al servidor (solo Supabase, API Key de Gemini va por env)
       await processUserMessage(session.id, session.user_id, userText, effectiveConfig);
     } catch (error: any) {
       console.error(error);
       const msg = error.message || "Error desconocido";
       if (msg.includes("API_KEY")) {
-        setErrorMsg("Error Server-Side: Falta API_KEY de Gemini. Ingrésala en Configuración (⚙️).");
+        setErrorMsg("Error Server-Side: Falta API_KEY de Gemini. Verifica la configuración del servidor.");
       } else {
         setErrorMsg(`Error: ${msg}`);
       }
