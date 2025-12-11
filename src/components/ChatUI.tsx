@@ -1,5 +1,4 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { supabase as defaultSupabase } from '../lib/supabase/supabase-client';
 import { processUserMessage } from '../app/actions';
 import { Message, SessionData, WorkflowState } from '../lib/types';
 import ReactMarkdown from 'react-markdown';
@@ -7,219 +6,181 @@ import { SupabaseClient } from '@supabase/supabase-js';
 
 interface ChatUIProps {
   initialSession: SessionData;
-  customSupabase?: SupabaseClient;
-  // Objeto de configuración unificado para pasar credenciales manuales al backend
-  config?: {
-    supabase?: { url: string; key: string };
-  };
-  /** @deprecated usar config */
-  manualConfig?: { url: string; key: string }; 
+  supabaseClient: SupabaseClient;
+  geminiKey?: string;
 }
 
-export default function ChatUI({ initialSession, customSupabase, config, manualConfig }: ChatUIProps) {
-  // Compatibilidad hacia atrás si se usa la prop antigua
-  const effectiveConfig = config || (manualConfig ? { supabase: manualConfig } : undefined);
-
-  const supabase = customSupabase || defaultSupabase;
-  
+export default function ChatUI({ initialSession, supabaseClient, geminiKey }: ChatUIProps) {
   const [session, setSession] = useState<SessionData>(initialSession);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [errorMsg, setErrorMsg] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
-  
-  const isDemo = session.id === 'demo-session';
 
-  // Safely extract data to avoid "reading length of undefined" crashes
-  const history = Array.isArray(session?.chat_history) ? session.chat_history : [];
-  const finalReport = session?.report_final || '';
+  const history = session.chat_history || [];
 
+  // Suscripción Realtime
   useEffect(() => {
-    setSession(initialSession);
-  }, [initialSession]);
+    if (session.id === 'demo-session') return;
 
-  useEffect(() => {
-    if (isDemo) return; 
-
-    console.log(`Suscribiéndose a cambios en sesión: ${session.id}`);
-    const channel = supabase
-      .channel(`session:${session.id}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'sessions',
-          filter: `id=eq.${session.id}`,
-        },
+    const channel = supabaseClient
+      .channel(`room:${session.id}`)
+      .on('postgres_changes', 
+        { event: 'UPDATE', schema: 'public', table: 'sessions', filter: `id=eq.${session.id}` }, 
         (payload) => {
-          console.log("Cambio recibido:", payload);
           if (payload.new) {
-            // Aseguramos que los datos críticos tengan un valor por defecto si vienen nulos
-            const newData = payload.new as SessionData;
-            setSession({
-              ...newData,
-              chat_history: Array.isArray(newData.chat_history) ? newData.chat_history : [],
-              report_final: newData.report_final || ''
-            });
+            setSession(payload.new as SessionData);
           }
         }
       )
-      .subscribe((status) => {
-        if (status === 'CHANNEL_ERROR') {
-          console.error("Error en canal realtime.");
-        }
-      });
+      .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      supabaseClient.removeChannel(channel);
     };
-  }, [session.id, isDemo, supabase]);
+  }, [session.id, supabaseClient]);
 
+  // Auto-scroll inteligente
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [history, session.current_state]); // Depend on safe history
+  }, [history.length, session.current_state, session.report_final]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || loading) return;
-    setErrorMsg('');
-
-    if (isDemo) {
-      setErrorMsg("Funcionalidad deshabilitada en Modo Demo. Configura las credenciales.");
-      return;
-    }
-
-    const userText = input;
-    setInput('');
+    
     setLoading(true);
+    const text = input;
+    setInput('');
 
     try {
-      // Pasamos el config completo al servidor (solo Supabase, API Key de Gemini va por env)
-      await processUserMessage(session.id, session.user_id, userText, effectiveConfig);
-    } catch (error: any) {
+      await processUserMessage(session.id, text, { geminiKey });
+    } catch (error) {
       console.error(error);
-      const msg = error.message || "Error desconocido";
-      if (msg.includes("API_KEY")) {
-        setErrorMsg("Error Server-Side: Falta API_KEY de Gemini. Verifica la configuración del servidor.");
-      } else {
-        setErrorMsg(`Error: ${msg}`);
-      }
+      alert("Hubo un error al procesar tu solicitud. Verifica tu conexión y API Key.");
     } finally {
       setLoading(false);
     }
   };
 
-  const renderStateBadge = (state: WorkflowState) => {
-    switch (state) {
-      case 'WAITING_FOR_INFO': return <span className="bg-gray-200 text-gray-700 px-3 py-1 rounded-full text-xs font-bold animate-pulse">Esperando Input</span>;
-      case 'START_RESEARCH': return <span className="bg-emerald-100 text-emerald-700 px-3 py-1 rounded-full text-xs font-bold animate-pulse">Pedro Investigando...</span>;
-      case 'START_REPORT': return <span className="bg-sky-100 text-sky-700 px-3 py-1 rounded-full text-xs font-bold animate-pulse">Juan Redactando...</span>;
-      case 'FINISHED': return <span className="bg-cyan-100 text-cyan-700 px-3 py-1 rounded-full text-xs font-bold">Sesión Finalizada</span>;
-      default: return null;
-    }
+  const renderBadge = (state: WorkflowState) => {
+    const config: Record<string, string> = {
+      'WAITING_FOR_INFO': 'bg-gray-100 text-gray-600 border-gray-200',
+      'START_RESEARCH': 'bg-amber-50 text-amber-700 border-amber-200 animate-pulse',
+      'START_REPORT': 'bg-indigo-50 text-indigo-700 border-indigo-200 animate-pulse',
+      'FINISHED': 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    };
+    
+    const labels: Record<string, string> = {
+      'WAITING_FOR_INFO': 'Esperando Instrucciones',
+      'START_RESEARCH': 'Agente Pedro Investigando...',
+      'START_REPORT': 'Agente Juan Redactando...',
+      'FINISHED': 'Análisis Completado',
+    };
+    
+    return (
+      <span className={`px-3 py-1 rounded-full text-xs font-bold border ${config[state] || 'bg-gray-100'}`}>
+        {labels[state] || state}
+      </span>
+    );
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-80px)] max-w-4xl mx-auto bg-white shadow-xl rounded-xl overflow-hidden my-4 border border-gray-200">
+    <div className="flex flex-col h-screen max-w-5xl mx-auto bg-white shadow-2xl overflow-hidden border-x border-gray-100">
+      
       {/* Header */}
-      <div className="bg-white border-b border-gray-200 p-4 flex justify-between items-center sticky top-0 z-10">
-        <div>
-          <h1 className="text-xl font-bold text-gray-800">Consultores Empresariales IA</h1>
-          <p className="text-xs text-gray-500">Sistema Multi-Agente: Pedro (Ingeniero) & Juan (PM)</p>
+      <header className="bg-white/90 backdrop-blur-sm p-4 border-b border-gray-200 flex justify-between items-center sticky top-0 z-10">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 bg-gradient-to-br from-cyan-500 to-blue-600 rounded-xl flex items-center justify-center text-white font-bold text-lg shadow-lg">
+            IA
+          </div>
+          <div>
+            <h1 className="font-bold text-gray-800 text-lg leading-tight">Consultores Empresariales</h1>
+            <p className="text-xs text-gray-500 font-medium">Sistema Multi-Agente Inteligente</p>
+          </div>
         </div>
-        {renderStateBadge(session.current_state)}
-      </div>
+        {renderBadge(session.current_state)}
+      </header>
 
-      {/* Chat Area */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-gray-50">
+      {/* Area de Chat */}
+      <div className="flex-1 overflow-y-auto bg-gray-50/50 p-4 sm:p-6 space-y-6">
         {history.length === 0 && (
-          <div className="text-center text-gray-400 mt-10">
-            <p className="mb-2 text-lg">Bienvenido al sistema de consultoría.</p>
-            <p className="text-sm">Introduce el nombre de tu empresa o el tema que deseas analizar.</p>
+          <div className="h-full flex flex-col items-center justify-center text-gray-400 opacity-60">
+            <div className="text-6xl mb-4">🏢</div>
+            <p className="text-lg font-medium">¿Qué empresa analizamos hoy?</p>
           </div>
         )}
-
+        
         {history.map((msg, idx) => {
           const isUser = msg.role === 'user';
           const isPedro = msg.name === 'Pedro';
-          const isJuan = msg.name === 'Juan';
-
+          
           return (
-            <div key={idx} className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
-              <div
-                className={`max-w-[85%] rounded-xl p-4 shadow-sm text-sm leading-relaxed ${
-                  isUser
-                    ? 'bg-white border border-gray-200 text-gray-800 rounded-tr-none'
-                    : isPedro
-                    ? 'bg-emerald-50 border-l-4 border-emerald-500 text-emerald-900 rounded-tl-none'
-                    : 'bg-sky-50 border-l-4 border-sky-500 text-sky-900 rounded-tl-none'
-                }`}
-              >
+            <div key={idx} className={`flex ${isUser ? 'justify-end' : 'justify-start'} animate-fade-in-up`}>
+              <div className={`max-w-[90%] sm:max-w-[80%] rounded-2xl p-5 shadow-sm text-sm leading-relaxed ${
+                isUser 
+                  ? 'bg-gray-900 text-white rounded-tr-sm' 
+                  : isPedro 
+                    ? 'bg-white border-l-4 border-amber-400 text-gray-800 rounded-tl-sm'
+                    : 'bg-white border-l-4 border-indigo-400 text-gray-800 rounded-tl-sm'
+              }`}>
                 {!isUser && (
-                  <div className="mb-2 font-bold text-xs uppercase tracking-wider opacity-70 flex items-center gap-2">
-                    {isPedro && <span>🤖 Pedro (Ing. IA)</span>}
-                    {isJuan && <span>👔 Juan (Project Manager)</span>}
+                  <div className="flex items-center gap-2 mb-3 border-b border-gray-100 pb-2">
+                    <span className="text-xl">{isPedro ? '⚡' : '📊'}</span>
+                    <span className={`font-bold text-xs uppercase tracking-wider ${isPedro ? 'text-amber-600' : 'text-indigo-600'}`}>
+                      {isPedro ? 'Pedro • Ing. Técnico' : 'Juan • Project Manager'}
+                    </span>
                   </div>
                 )}
-                <div className="markdown prose prose-sm max-w-none">
-                  {/* Protect ReactMarkdown from null content */}
-                  <ReactMarkdown>{msg.content || ''}</ReactMarkdown>
+                <div className="prose prose-sm max-w-none prose-p:my-1 dark:prose-invert">
+                  <ReactMarkdown>{msg.content}</ReactMarkdown>
                 </div>
               </div>
             </div>
           );
         })}
-
-        {/* Final Report Display */}
-        {finalReport && (
-          <div className="mt-8 border-t-2 border-cyan-100 pt-8">
-            <div className="bg-white border border-cyan-200 rounded-xl p-8 shadow-lg relative overflow-hidden">
-              <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-cyan-500 to-sky-600"></div>
-              <h2 className="text-2xl font-bold text-gray-800 mb-6 flex items-center gap-3">
-                <span className="text-3xl">📄</span> Informe Ejecutivo Final
-              </h2>
-              <div className="prose prose-cyan max-w-none text-gray-700">
-                <ReactMarkdown>{finalReport}</ReactMarkdown>
+        
+        {/* Reporte Final Destacado */}
+        {session.report_final && (
+          <div className="mt-8 mb-4 mx-2">
+            <div className="bg-white rounded-2xl shadow-xl overflow-hidden border border-emerald-100">
+              <div className="bg-emerald-600 p-4 text-white flex items-center gap-3">
+                <span className="text-2xl">🚀</span>
+                <h2 className="font-bold text-lg">Informe Ejecutivo Final</h2>
+              </div>
+              <div className="p-8 prose prose-emerald max-w-none">
+                <ReactMarkdown>{session.report_final}</ReactMarkdown>
+              </div>
+              <div className="bg-gray-50 p-4 text-center border-t border-gray-100">
+                <button 
+                  onClick={() => window.print()} 
+                  className="text-emerald-600 font-bold text-sm hover:underline"
+                >
+                  Descargar / Imprimir Informe
+                </button>
               </div>
             </div>
           </div>
         )}
-
+        
         <div ref={bottomRef} />
       </div>
 
       {/* Input Area */}
       <div className="p-4 bg-white border-t border-gray-200">
-        {errorMsg && (
-          <div className="mb-2 bg-red-50 text-red-800 text-xs px-3 py-2 rounded border border-red-200 flex justify-between items-center">
-             <span>{errorMsg}</span>
-             <button onClick={() => setErrorMsg('')} className="text-red-500 hover:text-red-700 font-bold ml-2">×</button>
-          </div>
-        )}
-        <form onSubmit={handleSubmit} className="flex gap-4">
-          <input
-            type="text"
+        <form onSubmit={handleSubmit} className="flex gap-3 max-w-4xl mx-auto relative">
+          <input 
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={e => setInput(e.target.value)}
             disabled={loading || session.current_state !== 'WAITING_FOR_INFO'}
-            placeholder={
-              session.current_state !== 'WAITING_FOR_INFO'
-                ? "Los agentes están trabajando..."
-                : "Escribe el nombre de tu empresa o tema a investigar..."
-            }
-            className="flex-1 px-4 py-3 rounded-xl border border-gray-300 focus:outline-none focus:ring-2 focus:ring-cyan-600 focus:border-transparent disabled:bg-gray-100 disabled:text-gray-400 transition-all"
+            placeholder={loading ? "Los agentes están trabajando..." : "Escribe el nombre de la empresa..."}
+            className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-5 py-4 focus:ring-2 focus:ring-cyan-500 focus:bg-white outline-none transition-all shadow-inner"
           />
-          <button
+          <button 
             type="submit"
             disabled={loading || session.current_state !== 'WAITING_FOR_INFO'}
-            className="bg-cyan-600 hover:bg-cyan-700 disabled:bg-gray-300 text-white font-semibold px-6 py-3 rounded-xl transition-colors shadow-md flex items-center gap-2"
+            className="bg-cyan-600 hover:bg-cyan-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white px-8 rounded-xl font-bold transition-all shadow-md transform active:scale-95"
           >
-            {loading ? (
-              <span className="inline-block w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-            ) : (
-              <span>Enviar</span>
-            )}
+            {loading ? '...' : 'Enviar'}
           </button>
         </form>
       </div>

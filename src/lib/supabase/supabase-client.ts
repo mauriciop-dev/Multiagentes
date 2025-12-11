@@ -1,20 +1,27 @@
 import { createClient } from '@supabase/supabase-js';
 
-// Cliente placeholder seguro
-// Este cliente se usa solo para inicializar tipos y evitar errores de build.
-// El cliente REAL se crea dinámicamente en page.tsx o actions.ts usando las variables del servidor.
+// Intentar leer variables inyectadas por Vite (definidas en vite.config.ts)
+// Se soportan tanto prefijos NEXT_PUBLIC_ como VITE_
+const envUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+const envKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+
+// Valores por defecto para evitar crashes si no hay env vars, permitiendo cargar la UI de configuración
+const DEFAULT_URL = 'https://placeholder.supabase.co';
+const DEFAULT_KEY = 'placeholder';
+
+// Cliente principal (singleton)
 export const supabase = createClient(
-  'https://placeholder.supabase.co',
-  'placeholder',
+  envUrl || DEFAULT_URL,
+  envKey || DEFAULT_KEY,
   {
     auth: {
-      persistSession: false,
-      autoRefreshToken: false,
-      detectSessionInUrl: false
+      persistSession: true,
+      autoRefreshToken: true,
     }
   }
 );
 
+// Helper para crear clientes dinámicos cuando el usuario ingresa credenciales manualmente
 export const createManualClient = (url: string, key: string) => {
   let cleanUrl = url.trim();
   if (!cleanUrl.startsWith('http')) {
@@ -22,13 +29,7 @@ export const createManualClient = (url: string, key: string) => {
   }
   cleanUrl = cleanUrl.replace(/\/$/, '');
   
-  return createClient(cleanUrl, key.trim(), {
-    auth: {
-      persistSession: true, // Permitir persistencia cuando se inyecta desde el server
-      autoRefreshToken: true,
-      detectSessionInUrl: false
-    }
-  });
+  return createClient(cleanUrl, key.trim());
 };
 
-export const isEnvConfigured = false; // Deprecated, logic moved to page.tsx
+export const isConfigured = !!(envUrl && envKey && !envUrl.includes('placeholder'));

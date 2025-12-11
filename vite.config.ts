@@ -3,29 +3,24 @@ import react from '@vitejs/plugin-react';
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
-  // Carga todas las variables de entorno, incluyendo las que no tienen prefijo VITE_
-  // El tercer argumento '' le dice a Vite que no filtre por prefijo.
-  // Using '.' instead of process.cwd() to avoid typing issues with 'Process'
+  // Carga todas las variables de entorno sin filtrar por prefijo VITE_
   const env = loadEnv(mode, '.', '');
 
   return {
     plugins: [react()],
     define: {
-      // SOLUCIÓN: Inyección explícita de variables para compatibilidad con código que usa process.env
+      // INYECCIÓN DE VARIABLES DE ENTORNO
+      // Esto reemplaza 'process.env.VARIABLE' por el valor real en el código del navegador
       
-      // 1. Claves de Google Gemini
+      // 1. Google Gemini API Key
       'process.env.API_KEY': JSON.stringify(env.API_KEY || env.GEMINI_API_KEY || env.GOOGLE_API_KEY),
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY || env.API_KEY),
       
-      // 2. Claves de Supabase (CRÍTICO: Inyectar las variables NEXT_PUBLIC_)
+      // 2. Supabase Configuration (NEXT_PUBLIC_ prefix support)
       'process.env.NEXT_PUBLIC_SUPABASE_URL': JSON.stringify(env.NEXT_PUBLIC_SUPABASE_URL),
       'process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY': JSON.stringify(env.NEXT_PUBLIC_SUPABASE_ANON_KEY),
-      
-      // 3. Fallbacks para asegurar que la lógica de "Servidor" (actions.ts ejecutándose en cliente)
-      //    encuentre las variables incluso si busca las versiones sin prefijo.
-      'process.env.SUPABASE_URL': JSON.stringify(env.NEXT_PUBLIC_SUPABASE_URL),
-      'process.env.SUPABASE_ANON_KEY': JSON.stringify(env.NEXT_PUBLIC_SUPABASE_ANON_KEY),
-      'process.env.SUPABASE_SERVICE_ROLE_KEY': JSON.stringify(env.SUPABASE_SERVICE_ROLE_KEY || ''), // Cuidado: Esto expondrá la service key al cliente si está definida en .env local.
+      'process.env.VITE_SUPABASE_URL': JSON.stringify(env.VITE_SUPABASE_URL || env.NEXT_PUBLIC_SUPABASE_URL),
+      'process.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(env.VITE_SUPABASE_ANON_KEY || env.NEXT_PUBLIC_SUPABASE_ANON_KEY),
     },
     server: {
       port: 3000
