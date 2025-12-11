@@ -3,11 +3,12 @@ import { supabase } from '../lib/supabase/supabase-client';
 import { Message, SessionData } from '../lib/types';
 
 // CONFIGURACIÓN DE GEMINI
-// Obtenemos la API Key del entorno (inyectada por Vite) o de la configuración manual
-const getAI = (apiKey?: string) => {
-  const key = apiKey || process.env.API_KEY || process.env.GEMINI_API_KEY;
+// Obtenemos la API Key del entorno (inyectada por Vite)
+// Nota: process.env es inyectado por vite.config.ts define
+const getAI = () => {
+  const key = process.env.API_KEY || process.env.GEMINI_API_KEY;
   if (!key) {
-    throw new Error("API Key de Gemini no encontrada. Por favor configúrala en el botón de ajustes ⚙️.");
+    throw new Error("Configuración incompleta: Falta la API_KEY de Gemini en las variables de entorno.");
   }
   return new GoogleGenAI({ apiKey: key });
 };
@@ -33,9 +34,9 @@ async function addMessage(id: string, currentHistory: Message[] | null | undefin
 }
 
 // -- Agente 1: Pedro (Investigador Técnico) --
-async function runPedroAgent(companyInfo: string, iteration: number, apiKey?: string): Promise<string> {
+async function runPedroAgent(companyInfo: string, iteration: number): Promise<string> {
   try {
-    const ai = getAI(apiKey);
+    const ai = getAI();
     const modelId = 'gemini-2.5-flash'; 
     
     const prompt = `
@@ -86,9 +87,9 @@ async function runPedroAgent(companyInfo: string, iteration: number, apiKey?: st
 }
 
 // -- Agente 2: Juan (Project Manager) --
-async function runJuanAgent(companyInfo: string, researchResults: string[], apiKey?: string): Promise<string> {
+async function runJuanAgent(companyInfo: string, researchResults: string[]): Promise<string> {
   try {
-    const ai = getAI(apiKey);
+    const ai = getAI();
     const modelId = 'gemini-2.5-flash';
     
     const prompt = `
@@ -125,11 +126,8 @@ async function runJuanAgent(companyInfo: string, researchResults: string[], apiK
 // -- Orquestador Principal (Función invocada desde la UI) --
 export async function processUserMessage(
   sessionId: string, 
-  userContent: string,
-  manualConfig?: { geminiKey?: string }
+  userContent: string
 ) {
-  const geminiKey = manualConfig?.geminiKey;
-
   // 1. Recuperar estado actual desde Supabase
   const { data: session, error } = await supabase
     .from('sessions')
@@ -137,7 +135,7 @@ export async function processUserMessage(
     .eq('id', sessionId)
     .single();
 
-  if (error || !session) throw new Error("Error de conexión con la base de datos. Verifica tus credenciales de Supabase.");
+  if (error || !session) throw new Error("Error de conexión con la base de datos.");
 
   let currentSession = session as SessionData;
   let history = currentSession.chat_history || [];
@@ -168,7 +166,7 @@ export async function processUserMessage(
     await updateSession(sessionId, { research_counter: i + 1 });
     
     // Llamada a Gemini (Pedro)
-    const finding = await runPedroAgent(userContent, i + 1, geminiKey);
+    const finding = await runPedroAgent(userContent, i + 1);
     researchResults.push(finding);
     
     history = await addMessage(sessionId, history, {
@@ -192,7 +190,7 @@ export async function processUserMessage(
   });
 
   // Llamada a Gemini (Juan)
-  const finalReport = await runJuanAgent(userContent, researchResults, geminiKey);
+  const finalReport = await runJuanAgent(userContent, researchResults);
 
   history = await addMessage(sessionId, history, {
     role: 'agent',

@@ -7,10 +7,9 @@ import { SupabaseClient } from '@supabase/supabase-js';
 interface ChatUIProps {
   initialSession: SessionData;
   supabaseClient: SupabaseClient;
-  geminiKey?: string;
 }
 
-export default function ChatUI({ initialSession, supabaseClient, geminiKey }: ChatUIProps) {
+export default function ChatUI({ initialSession, supabaseClient }: ChatUIProps) {
   const [session, setSession] = useState<SessionData>(initialSession);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -20,8 +19,6 @@ export default function ChatUI({ initialSession, supabaseClient, geminiKey }: Ch
 
   // Suscripción Realtime
   useEffect(() => {
-    if (session.id === 'demo-session') return;
-
     const channel = supabaseClient
       .channel(`room:${session.id}`)
       .on('postgres_changes', 
@@ -53,10 +50,11 @@ export default function ChatUI({ initialSession, supabaseClient, geminiKey }: Ch
     setInput('');
 
     try {
-      await processUserMessage(session.id, text, { geminiKey });
+      // Ya no pasamos keys manuales, processUserMessage usará process.env
+      await processUserMessage(session.id, text);
     } catch (error) {
       console.error(error);
-      alert("Hubo un error al procesar tu solicitud. Verifica tu conexión y API Key.");
+      alert("Hubo un error al procesar tu solicitud. Por favor intenta de nuevo.");
     } finally {
       setLoading(false);
     }
