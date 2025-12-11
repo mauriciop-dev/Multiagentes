@@ -24,6 +24,36 @@ const DEMO_SESSION: SessionData = {
   research_counter: 1
 };
 
+// Helper para detectar variables en cualquier entorno (Vite o Next.js)
+// IMPORTANTE: El acceso debe ser explícito para que el bundler haga el reemplazo.
+const detectClientEnv = () => {
+  let url = '';
+  let key = '';
+
+  try {
+    // 1. Intento Next.js / Create React App (process.env)
+    if (typeof process !== 'undefined' && process.env) {
+      url = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+      key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+    }
+  } catch(e) {}
+
+  // 2. Intento Vite (import.meta.env) - Si process.env falló o estaba vacío
+  if (!url || !key) {
+    try {
+      // @ts-ignore
+      if (typeof import.meta !== 'undefined' && import.meta.env) {
+        // @ts-ignore
+        url = import.meta.env.VITE_SUPABASE_URL || import.meta.env.NEXT_PUBLIC_SUPABASE_URL || '';
+        // @ts-ignore
+        key = import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+      }
+    } catch (e) {}
+  }
+
+  return { url, key };
+};
+
 export default function Page() {
   const [sessionData, setSessionData] = useState<SessionData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -120,9 +150,10 @@ export default function Page() {
         const serverUrl = serverConfig.supabaseUrl;
         const serverKey = serverConfig.supabaseAnonKey;
         
-        const clientEnvUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-        const clientEnvKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-        
+        // Detección robusta en Cliente
+        const clientEnv = detectClientEnv();
+        console.log("🔍 Variables Cliente detectadas:", clientEnv.url ? "SÍ" : "NO");
+
         const storedUrl = localStorage.getItem('saved_supabase_url');
         const storedKey = localStorage.getItem('saved_supabase_key');
         const storedGemini = localStorage.getItem('saved_gemini_key');
@@ -136,13 +167,13 @@ export default function Page() {
           finalUrl = serverUrl;
           finalKey = serverKey;
           source = 'server';
-        } else if (clientEnvUrl && clientEnvKey) {
+        } else if (clientEnv.url && clientEnv.key) {
           console.log("ℹ️ Usando variables de entorno del Cliente (Fallback).");
-          finalUrl = clientEnvUrl;
-          finalKey = clientEnvKey;
+          finalUrl = clientEnv.url;
+          finalKey = clientEnv.key;
           source = 'client-env';
-          setManualUrl(clientEnvUrl);
-          setManualKey(clientEnvKey);
+          setManualUrl(clientEnv.url);
+          setManualKey(clientEnv.key);
           setForceClientConfig(true);
         } else if (storedUrl && storedKey) {
           console.log("⚠️ Usando credenciales guardadas en LocalStorage.");
@@ -221,11 +252,13 @@ export default function Page() {
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-8 max-h-[90vh] overflow-y-auto">
             <h2 className="text-2xl font-bold text-gray-800 mb-2">Conexión Requerida</h2>
             <p className="text-gray-600 mb-4 text-sm">
-              El servidor no detectó las variables. Esto ocurre a menudo tras el primer despliegue.
+              No se detectaron credenciales en el entorno.
             </p>
             
             <div className="mb-6 bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-xs text-yellow-800">
-              <strong>Tip Rápido:</strong> Si ya configuraste las variables en Vercel, intenta hacer un <strong>Redeploy</strong> de tu proyecto. Las variables nuevas a menudo requieren reinicar el servidor.
+              <strong>Diagnóstico:</strong> El servidor no ve las variables y el cliente tampoco. <br/>
+              1. Asegúrate de hacer <strong>Redeploy</strong> en Vercel para que los cambios de variables surtan efecto.<br/>
+              2. O introduce las claves manualmente aquí (se guardarán en tu navegador).
             </div>
 
             {errorMessage && (
